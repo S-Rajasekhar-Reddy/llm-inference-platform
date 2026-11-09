@@ -35,7 +35,7 @@ Scaling is driven by `vllm:num_requests_waiting` (queue depth), not GPU utilisat
 ## Roadmap
 
 - [x] vLLM serving an open-weight model on a local GPU (WSL2, RTX 5080 Laptop)
-- [ ] Qwen3-8B-FP8 serving, with KV-cache capacity measured on 16 GB
+- [x] Qwen3-8B-FP8 serving, with KV-cache capacity measured on 16 GB
 - [ ] k3s with GPU access on WSL2 + Helm chart (`make up-local` / `make down-local`)
 - [ ] Prometheus/Grafana dashboard: TTFT, inter-token latency, throughput, KV-cache usage, queue depth, GPU utilisation
 - [ ] Autoscaling on queue depth with KEDA
@@ -46,16 +46,20 @@ Scaling is driven by `vllm:num_requests_waiting` (queue depth), not GPU utilisat
 
 Baseline smoke test, **not a final benchmark** (one run, no warm-up). Full methodology lands with the write-up.
 
-| | |
-|---|---|
-| Hardware | RTX 5080 Laptop GPU, 16 GB, Windows 11 + WSL2 (Ubuntu 24.04) |
-| Stack | vLLM `v0.33.0` (Docker), NVIDIA Container Toolkit 1.20.1, FLASH_ATTN backend |
-| Model | Qwen3-1.7B (BF16), `--max-model-len 4096`, `--gpu-memory-utilization 0.85` |
-| KV cache | 9.17 GiB, 85,824 tokens |
-| Workload | Random 512 input / 128 output tokens, 100 prompts, concurrency 8 |
-| Throughput | 6.57 req/s, 840.6 output tok/s |
-| TTFT | median 147.7 ms, p99 405.8 ms |
-| Inter-token latency | median 7.48 ms, p99 29.5 ms |
+Hardware: RTX 5080 Laptop GPU (16 GB), Windows 11 + WSL2 (Ubuntu 24.04). Stack: vLLM `v0.33.0` (Docker), NVIDIA Container Toolkit 1.20.1, `--gpu-memory-utilization 0.85`. Workload: random 512 input / 128 output tokens, 100 prompts, concurrency 8.
+
+| | Qwen3-1.7B (BF16) | Qwen3-8B-FP8 |
+|---|---|---|
+| Max model length | 4,096 | 8,192 |
+| Weights in GPU memory | 3.22 GiB | 8.85 GiB |
+| KV cache | 9.17 GiB, 85,824 tokens | 2.89 GiB, 21,024 tokens |
+| Full-length requests that fit at once | about 21 | 2.57 |
+| Throughput | 6.57 req/s, 840.6 output tok/s | 2.92 req/s, 373.8 output tok/s |
+| TTFT | median 147.7 ms, p99 405.8 ms | median 308.5 ms, p99 495.8 ms |
+| Inter-token latency | median 7.48 ms, p99 29.5 ms | median 17.9 ms, p99 54.5 ms |
+| Engine startup (weights cached) | 103 s | 151 s |
+
+The early takeaway: on 16 GB, the 8B model's weights leave under 3 GiB for KV cache, so long-context concurrency, not compute, will be the first wall.
 
 ## Planned layout
 
@@ -71,7 +75,7 @@ Baseline smoke test, **not a final benchmark** (one run, no warm-up). Full metho
 
 ## Progress log
 
-- **2026-11-09:** vLLM `v0.33.0` serving Qwen3-1.7B on the RTX 5080 Laptop GPU in WSL2; Blackwell (SM_120) works out of the box. First start took about 14.5 min, mostly the weight download; engine startup took 103 s. Baseline benchmark above.
+- **2026-11-09:** vLLM `v0.33.0` serving Qwen3-1.7B and Qwen3-8B-FP8 on the RTX 5080 Laptop GPU in WSL2. Blackwell (SM_120) works out of the box, including native FP8 kernels. Cold starts are dominated by weight download (12.9 min for 1.7B, 33 min for 8B on a home connection), which is why the platform caches weights. Baseline benchmarks above.
 - **2026-11-08:** Repo created.
 
 ## License

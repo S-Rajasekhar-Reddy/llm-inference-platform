@@ -32,11 +32,38 @@ flowchart LR
 
 Scaling is driven by `vllm:num_requests_waiting` (queue depth), not GPU utilisation. A busy GPU is normal; a growing queue is what users feel.
 
+## Run it today
+
+What works right now is vLLM in Docker on a single NVIDIA GPU. Prerequisites: WSL2 (Ubuntu 24.04) or Linux, Docker Engine and the NVIDIA Container Toolkit.
+
+```bash
+# Serve Qwen3-8B-FP8 (the first run downloads about 9 GB of weights into ~/.cache/huggingface)
+docker run --rm --gpus all --ipc=host -p 8000:8000 \
+  -v ~/.cache/huggingface:/root/.cache/huggingface \
+  -v ~/.cache/vllm:/root/.cache/vllm \
+  vllm/vllm-openai:v0.33.0 \
+  --model Qwen/Qwen3-8B-FP8 --max-model-len 8192 --gpu-memory-utilization 0.85
+
+# Once the weights are cached, add -e HF_HUB_OFFLINE=1 after --ipc=host to skip Hugging Face network checks.
+
+# Check it answers
+curl -s localhost:8000/v1/chat/completions -H "Content-Type: application/json" \
+  -d '{"model":"Qwen/Qwen3-8B-FP8","messages":[{"role":"user","content":"Hello"}],"chat_template_kwargs":{"enable_thinking":false}}'
+
+# Load test (from a second terminal)
+docker exec -it $(docker ps -q --filter ancestor=vllm/vllm-openai:v0.33.0) vllm bench serve \
+  --model Qwen/Qwen3-8B-FP8 --dataset-name random --random-input-len 512 --random-output-len 128 \
+  --num-prompts 100 --max-concurrency 8
+
+# Measure cold start (starts and stops its own container)
+OFFLINE=1 bench/coldstart.sh my-run Qwen/Qwen3-8B-FP8 --max-model-len 8192 --gpu-memory-utilization 0.85
+```
+
 ## Roadmap
 
 - [x] vLLM serving an open-weight model on a local GPU (WSL2, RTX 5080 Laptop)
 - [x] Qwen3-8B-FP8 serving, with KV-cache capacity measured on 16 GB
-- [ ] k3s with GPU access on WSL2 + Helm chart (`make up-local` / `make down-local`)
+- [ ] k3s with GPU access on WSL2 + Helm chart (planned: `make up-local` / `make down-local`)
 - [ ] Prometheus/Grafana dashboard: TTFT, inter-token latency, throughput, KV-cache usage, queue depth, GPU utilisation
 - [ ] Autoscaling on queue depth with KEDA
 - [ ] One AWS EKS run (Terraform, Karpenter, L4): same chart, node autoscaling, cold-start breakdown
@@ -57,17 +84,19 @@ Hardware: RTX 5080 Laptop GPU (16 GB), Windows 11 + WSL2 (Ubuntu 24.04). Stack: 
 | Throughput | 6.57 req/s, 840.6 output tok/s | 2.92 req/s, 373.8 output tok/s |
 | TTFT | median 147.7 ms, p99 405.8 ms | median 308.5 ms, p99 495.8 ms |
 | Inter-token latency | median 7.48 ms, p99 29.5 ms | median 17.9 ms, p99 54.5 ms |
-| Engine startup (weights cached) | 103 s | 151 s |
+| vLLM engine init, first start (vLLM's internal timer) | 103 s | 151 s |
 
 The early takeaway: on 16 GB, the 8B model's weights leave under 3 GiB for KV cache, so long-context concurrency, not compute, will be the first wall.
 
-### Cold start: 35 minutes to about 2.3 minutes
+Engine init is vLLM's own timer for memory profiling, KV-cache allocation and warm-up. It excludes container start, weight download and loading, and API server start, so it is shorter than the wall-clock "ready" times in the cold-start table below, which come from separate runs on 10 Nov.
 
-Measured with [`bench/coldstart.sh`](bench/coldstart.sh): wall-clock time from `docker run` until `/health` returns 200, Qwen3-8B-FP8, same flags every run. Raw logs and `results.jsonl` are in [`bench/results/coldstart/`](bench/results/coldstart/).
+### Cold start (Qwen3-8B-FP8): 35 minutes to about 2.3 minutes
+
+Measured with [`bench/coldstart.sh`](bench/coldstart.sh): wall-clock time from `docker run` until `/health` returns 200, Qwen3-8B-FP8, same flags every run. Raw logs and `results.jsonl` are in [`bench/results/coldstart/`](bench/results/coldstart/). For comparison, the smaller Qwen3-1.7B took about 14.5 min on its first start, 12.9 min of it weight download (9 Nov log).
 
 | Run | Ready | Weight download | Weight load | torch.compile | Engine init |
 |---|---|---|---|---|---|
-| First start, nothing cached (9 Nov log, approximate) | about 35 min | 1,981 s | 1.3 s | 20.7 s | 151 s |
+| First start, nothing cached (Qwen3-8B-FP8, 9 Nov log, approximate) | about 35 min | 1,981 s | 1.3 s | 20.7 s | 151 s |
 | Weights cached on local disk | 212 s | none | 5.2 s | 21.2 s | 147 s |
 | + offline mode (`HF_HUB_OFFLINE=1`), compile cache filling | 153 s | none | 1.5 s | 21.0 s | 116 s |
 | + compile cache hit (run 1) | **135 s** | none | 1.2 s | 0.16 s | 95 s |
@@ -81,10 +110,12 @@ What changed:
 
 Side finding: with the compile cache hit, vLLM's startup memory profiling measured a lower peak activation (0.92 GiB instead of 1.58 GiB), so the KV cache grew from 21,024 to 25,824 tokens with identical flags and identical free memory (14.61 GiB). Capacity can change between restarts, so benchmarks will pin `--kv-cache-memory` explicitly.
 
-## Planned layout
+## Planned layout (not built yet)
+
+Only `bench/` exists today; the rest arrives with the milestones above.
 
 ```
-├── Makefile                 # up-local, down-local, up-cloud, down-cloud, bench
+├── Makefile                 # planned: up-local, down-local, up-cloud, down-cloud, bench
 ├── infra/terraform/         # VPC, EKS, Karpenter, IAM, S3 (cloud run)
 ├── charts/vllm/             # Helm chart: values-local.yaml, values-cloud.yaml
 ├── platform/                # k3s + WSL2 GPU setup, monitoring values

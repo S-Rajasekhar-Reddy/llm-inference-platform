@@ -63,7 +63,7 @@ OFFLINE=1 bench/coldstart.sh my-run Qwen/Qwen3-8B-FP8 --max-model-len 8192 --gpu
 
 - [x] vLLM serving an open-weight model on a local GPU (WSL2, RTX 5080 Laptop)
 - [x] Qwen3-8B-FP8 serving, with KV-cache capacity measured on 16 GB
-- [ ] k3s with GPU access on WSL2 + Helm chart (planned: `make up-local` / `make down-local`)
+- [x] k3s with GPU access on WSL2 + Helm chart (planned: `make up-local` / `make down-local`)
 - [ ] Prometheus/Grafana dashboard: TTFT, inter-token latency, throughput, KV-cache usage, queue depth, GPU utilisation
 - [ ] Autoscaling on queue depth with KEDA
 - [ ] One AWS EKS run (Terraform, Karpenter, L4): same chart, node autoscaling, cold-start breakdown
@@ -126,6 +126,7 @@ Only `bench/` exists today; the rest arrives with the milestones above.
 
 ## Progress log
 
+- **11 Nov:** vLLM serving on k3s (WSL2) with the GPU scheduled by the NVIDIA device plugin; fixed a VLLM_PORT service-link crash.
 - **2026-11-10:** Cold start for Qwen3-8B-FP8 cut from about 35 min to 135–145 s by caching weights locally, persisting vLLM's compile cache and running Hugging Face offline. Measured with `bench/coldstart.sh`; remaining time is CUDA graph capture.
 - **2026-11-09:** vLLM `v0.33.0` serving Qwen3-1.7B and Qwen3-8B-FP8 on the RTX 5080 Laptop GPU in WSL2. Blackwell (SM_120) works out of the box, including native FP8 kernels. Cold starts are dominated by weight download (12.9 min for 1.7B, 33 min for 8B on a home connection), which is why the platform caches weights. Baseline benchmarks above.
 - **2026-11-08:** Repo created.

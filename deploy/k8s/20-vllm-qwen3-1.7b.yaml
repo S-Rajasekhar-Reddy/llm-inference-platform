@@ -1,0 +1,93 @@
+# vLLM (OpenAI-compatible) serving Qwen3-1.7B on the local k3s node.
+# Caches are hostPath mounts of the same directories the Docker runs used,
+# so weights are not re-downloaded and torch.compile results are reused.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  labels:
+    app: vllm
+spec:
+  replicas: 1
+  # One GPU: a rolling update would start a second pod that cannot fit.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: vllm
+  template:
+    metadata:
+      labels:
+        app: vllm
+    spec:
+      runtimeClassName: nvidia
+      # A Service named "vllm" would inject VLLM_PORT=tcp://<ip>:8000 (legacy service-link env vars), which vLLM reads as its own setting and crashes.
+      enableServiceLinks: false
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.33.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - --model
+            - Qwen/Qwen3-1.7B
+            - --max-model-len
+            - "8192"
+            - --gpu-memory-utilization
+            - "0.85"
+          env:
+            - name: HF_HUB_OFFLINE
+              value: "1"
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+          ports:
+            - name: http
+              containerPort: 8000
+          # GPU request, advertised by the NVIDIA device plugin (10-nvidia-device-plugin.yaml).
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 120   # up to 10 min for a cold compile
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /root/.cache/huggingface
+            - name: vllm-cache
+              mountPath: /root/.cache/vllm
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: hf-cache
+          hostPath:
+            path: /home/tamms/.cache/huggingface
+            type: Directory
+        - name: vllm-cache
+          hostPath:
+            path: /home/tamms/.cache/vllm
+            type: DirectoryOrCreate
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+  labels:
+    app: vllm
+spec:
+  selector:
+    app: vllm
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

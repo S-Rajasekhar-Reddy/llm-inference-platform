@@ -1,0 +1,18 @@
+# Smallest possible GPU check: run nvidia-smi once under the nvidia runtime.
+# kubectl apply -f deploy/k8s/00-gpu-smoke-test.yaml && kubectl logs -f gpu-smoke
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-smoke
+spec:
+  runtimeClassName: nvidia
+  restartPolicy: Never
+  containers:
+    - name: cuda
+      image: nvidia/cuda:12.8.1-base-ubuntu24.04
+      command: ["nvidia-smi"]
+      env:
+        - name: NVIDIA_VISIBLE_DEVICES
+          value: all
+        - name: NVIDIA_DRIVER_CAPABILITIES
+          value: compute,utility

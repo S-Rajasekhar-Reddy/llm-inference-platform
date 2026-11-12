@@ -4,7 +4,7 @@ Production-style LLM serving on Kubernetes with vLLM: autoscaling on queue depth
 
 Built by an infrastructure and security engineer, as a secure, observable, production-grade AI serving platform you can reproduce with one command.
 
-**Status:** Week 1 of 5. vLLM is serving on a local GPU; Kubernetes comes in week 2. Built in public; progress is logged below.
+**Status:** Week 1 of 3. vLLM is serving on a local GPU; Kubernetes comes in week 2. Built in public; progress is logged below.
 
 ## Why this exists
 
@@ -12,8 +12,8 @@ Most LLM serving demos stop at `vllm serve` on one GPU. Production serving is an
 
 ## Approach: local first, cloud once
 
-- **Weeks 1–4, local:** an RTX 5080 Laptop GPU (16 GB) under WSL2, running k3s, the same Helm chart and the same monitoring stack. Free iteration on real hardware.
-- **Weeks 4–5, cloud:** one short Terraform-provisioned run on AWS EKS with an NVIDIA L4, using the **same Helm chart**. It proves portability and node autoscaling, and it gives a measured cost per 1M tokens.
+- **Weeks 1–2, local:** an RTX 5080 Laptop GPU (16 GB) under WSL2, running k3s, the same Helm chart and the same monitoring stack. Free iteration on real hardware.
+- **Weeks 2–3, cloud:** one short Terraform-provisioned run on AWS EKS with an NVIDIA L4, using the **same Helm chart**. It proves portability and node autoscaling, and it gives a measured cost per 1M tokens.
 - **Model:** [Qwen3-8B-FP8](https://huggingface.co/Qwen/Qwen3-8B-FP8) (Apache-2.0) as the primary model, and Qwen3-1.7B for fast iteration.
 - **Engine:** vLLM, pinned to an exact release (currently `v0.33.0`).
 

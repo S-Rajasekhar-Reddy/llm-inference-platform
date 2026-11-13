@@ -2,9 +2,9 @@
 
 Production-style LLM serving on Kubernetes with vLLM: autoscaling on queue depth, real observability, and published latency and cost benchmarks.
 
-Built by an infrastructure and security engineer, as a secure, observable, production-grade AI serving platform you can reproduce with one command.
+Built by an infrastructure and security engineer, as a secure, observable, production-grade AI serving platform. The goal is to reproduce it with one command (`make up-local` / `make up-cloud`, coming in weeks 2–3).
 
-**Status:** Week 1 of 3. vLLM is serving on a local GPU; Kubernetes comes in week 2. Built in public; progress is logged below.
+**Status:** Week 1 of 3; the platform ships Fri 27 Nov. vLLM serves on a local GPU in Docker and on k3s with the GPU scheduled by the NVIDIA device plugin. Helm, monitoring and autoscaling come in week 2, the cloud run in week 3. Built in public; progress is logged below.
 
 ## Why this exists
 
@@ -13,7 +13,7 @@ Most LLM serving demos stop at `vllm serve` on one GPU. Production serving is an
 ## Approach: local first, cloud once
 
 - **Weeks 1–2, local:** an RTX 5080 Laptop GPU (16 GB) under WSL2, running k3s, the same Helm chart and the same monitoring stack. Free iteration on real hardware.
-- **Weeks 2–3, cloud:** one short Terraform-provisioned run on AWS EKS with an NVIDIA L4, using the **same Helm chart**. It proves portability and node autoscaling, and it gives a measured cost per 1M tokens.
+- **Week 3, cloud:** one short Terraform-provisioned run on AWS EKS with an NVIDIA L4, using the **same Helm chart**. It proves portability and node autoscaling, and it gives a measured cost per 1M tokens.
 - **Model:** [Qwen3-8B-FP8](https://huggingface.co/Qwen/Qwen3-8B-FP8) (Apache-2.0) as the primary model, and Qwen3-1.7B for fast iteration.
 - **Engine:** vLLM, pinned to an exact release (currently `v0.33.0`).
 
@@ -34,7 +34,7 @@ Scaling is driven by `vllm:num_requests_waiting` (queue depth), not GPU utilisat
 
 ## Run it today
 
-What works right now is vLLM in Docker on a single NVIDIA GPU. Prerequisites: WSL2 (Ubuntu 24.04) or Linux, Docker Engine and the NVIDIA Container Toolkit.
+What works right now: vLLM in Docker on a single NVIDIA GPU (below), and vLLM on single-node k3s with GPU scheduling (see [`deploy/k8s/`](deploy/k8s/README.md)). Prerequisites: WSL2 (Ubuntu 24.04) or Linux, Docker Engine and the NVIDIA Container Toolkit.
 
 ```bash
 # Serve Qwen3-8B-FP8 (the first run downloads about 9 GB of weights into ~/.cache/huggingface)
@@ -63,11 +63,13 @@ OFFLINE=1 bench/coldstart.sh my-run Qwen/Qwen3-8B-FP8 --max-model-len 8192 --gpu
 
 - [x] vLLM serving an open-weight model on a local GPU (WSL2, RTX 5080 Laptop)
 - [x] Qwen3-8B-FP8 serving, with KV-cache capacity measured on 16 GB
-- [x] k3s with GPU access on WSL2 + Helm chart (planned: `make up-local` / `make down-local`)
-- [ ] Prometheus/Grafana dashboard: TTFT, inter-token latency, throughput, KV-cache usage, queue depth, GPU utilisation
-- [ ] Autoscaling on queue depth with KEDA
-- [ ] One AWS EKS run (Terraform, Karpenter, L4): same chart, node autoscaling, cold-start breakdown
-- [ ] Benchmark write-up: laptop vs cloud L4, cost per 1M output tokens (cloud)
+- [x] Cold start cut from about 35 min to about 2.3 min (weight and compile caches); upstream vLLM data and fix validation ([#54383](https://github.com/vllm-project/vllm/issues/54383), [PR #54479](https://github.com/vllm-project/vllm/pull/54479))
+- [x] k3s on WSL2 with the GPU scheduled by the NVIDIA device plugin; vLLM Deployment + Service serving completions ([`deploy/k8s/`](deploy/k8s/README.md))
+- [ ] (week 2) Helm chart replacing the plain manifests, with `make up-local` / `make down-local`
+- [ ] (week 2) Prometheus/Grafana dashboard: TTFT, inter-token latency, throughput, KV-cache usage, queue depth, GPU utilisation
+- [ ] (week 2) Autoscaling on queue depth with KEDA
+- [ ] (week 3) One AWS EKS run (Terraform, Karpenter, L4): same chart, node autoscaling, cold-start breakdown
+- [ ] (week 3) Benchmark write-up: laptop vs cloud L4, cost per 1M output tokens (cloud)
 
 ## Results so far
 
@@ -110,14 +112,17 @@ What changed:
 
 Side finding: with the compile cache hit, vLLM's startup memory profiling measured a lower peak activation (0.92 GiB instead of 1.58 GiB), so the KV cache grew from 21,024 to 25,824 tokens with identical flags and identical free memory (14.61 GiB). Capacity can change between restarts, so benchmarks will pin `--kv-cache-memory` explicitly.
 
-## Planned layout (not built yet)
+This is open vLLM issue [#54383](https://github.com/vllm-project/vllm/issues/54383): torch.compile's temporary memory on a cold boot is counted as activation memory. On this 16 GB card the gap was 22.8%, against about 4–5% in earlier reports, so I added that data point to the issue. I then validated the proposed fix, [PR #54479](https://github.com/vllm-project/vllm/pull/54479), on v0.33.0: the patched cold boot got 25,824 tokens and 0.92 GiB peak activation, matching the warm boot, for about 3–6 s of extra engine init. Logs: `*-unpatched-cold.log`, `*-pr54479-cold.log` and `*-pr54479-warm.log` in [`bench/results/coldstart/`](bench/results/coldstart/).
 
-Only `bench/` exists today; the rest arrives with the milestones above.
+## Layout
+
+`bench/` and `deploy/k8s/` exist today; the rest arrives with the milestones above.
 
 ```
 ├── Makefile                 # planned: up-local, down-local, up-cloud, down-cloud, bench
 ├── infra/terraform/         # VPC, EKS, Karpenter, IAM, S3 (cloud run)
-├── charts/vllm/             # Helm chart: values-local.yaml, values-cloud.yaml
+├── deploy/k8s/              # built: plain k3s manifests (GPU smoke test, device plugin, vLLM)
+├── charts/vllm/             # Helm chart: values-local.yaml, values-cloud.yaml (replaces deploy/k8s)
 ├── platform/                # k3s + WSL2 GPU setup, monitoring values
 ├── observability/           # Grafana dashboards, alert rules
 ├── bench/                   # benchmark runner + raw results (never edited by hand)
@@ -126,8 +131,9 @@ Only `bench/` exists today; the rest arrives with the milestones above.
 
 ## Progress log
 
-- **11 Nov:** vLLM serving on k3s (WSL2) with the GPU scheduled by the NVIDIA device plugin; fixed a VLLM_PORT service-link crash.
-- **2026-11-10:** Cold start for Qwen3-8B-FP8 cut from about 35 min to 135–145 s by caching weights locally, persisting vLLM's compile cache and running Hugging Face offline. Measured with `bench/coldstart.sh`; remaining time is CUDA graph capture.
+- **2026-11-12:** Plan compressed after week 1 ran ahead: the platform now ships Fri 27 Nov (was 11 Dec); the cloud run moves to week 3.
+- **2026-11-11:** vLLM serving on k3s (WSL2) with the GPU scheduled by NVIDIA device plugin v0.20.1, which detects WSL2. Fixed a crash loop: a Service named `vllm` makes Kubernetes inject `VLLM_PORT=tcp://…`, which vLLM reads as its own setting (`enableServiceLinks: false`). The compile cache carried over through a hostPath volume. Details in [`deploy/k8s/`](deploy/k8s/README.md).
+- **2026-11-10:** Cold start for Qwen3-8B-FP8 cut from about 35 min to 135–145 s by caching weights locally, persisting vLLM's compile cache and running Hugging Face offline. Measured with `bench/coldstart.sh`; remaining time is CUDA graph capture. Reported the first-boot KV-cache gap upstream and validated fix PR #54479 on v0.33.0.
 - **2026-11-09:** vLLM `v0.33.0` serving Qwen3-1.7B and Qwen3-8B-FP8 on the RTX 5080 Laptop GPU in WSL2. Blackwell (SM_120) works out of the box, including native FP8 kernels. Cold starts are dominated by weight download (12.9 min for 1.7B, 33 min for 8B on a home connection), which is why the platform caches weights. Baseline benchmarks above.
 - **2026-11-08:** Repo created.
 

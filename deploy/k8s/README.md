@@ -1,7 +1,7 @@
 # Local Kubernetes: k3s on WSL2
 
 Plain manifests for running the platform on a single-node k3s cluster inside WSL2
-(RTX 5080 Laptop GPU, 16 GB). A Helm chart comes later; EKS runs this properly in week 4.
+(RTX 5080 Laptop GPU, 16 GB). A Helm chart comes later; EKS runs this properly in week 3.
 
 | File | What it does |
 |---|---|

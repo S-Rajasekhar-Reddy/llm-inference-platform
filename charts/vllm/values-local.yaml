@@ -4,3 +4,11 @@ runtimeClassName: nvidia
 hfOffline: true           # weights are already cached locally
 cache:
   type: hostPath
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+  dashboard:
+    enabled: true
+  alerts:
+    enabled: true

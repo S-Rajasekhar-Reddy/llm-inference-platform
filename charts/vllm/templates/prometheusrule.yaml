@@ -1,0 +1,57 @@
+{{- if .Values.monitoring.alerts.enabled }}
+{{- if not (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule") }}
+{{- fail "monitoring.alerts.enabled needs the Prometheus Operator CRDs: run `make monitoring-up` first" }}
+{{- end }}
+{{- $a := .Values.monitoring.alerts }}
+{{- $sel := printf "job=\"%s\", namespace=\"%s\"" (include "vllm.fullname" .) .Release.Namespace }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "vllm.fullname" . }}
+  labels:
+    {{- include "vllm.labels" . | nindent 4 }}
+    {{- with $a.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: vllm.slo
+      rules:
+        - alert: VLLMTimeToFirstTokenHigh
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{ {{- $sel -}} }[5m]))
+            ) > {{ $a.ttft.sloSeconds }}
+          for: {{ $a.ttft.for }}
+          labels:
+            severity: warning
+          annotations:
+            summary: {{ printf "p95 time to first token is above the %vs SLO" $a.ttft.sloSeconds | quote }}
+            description: {{ `p95 TTFT is {{ $value | humanizeDuration }}. Check queue depth and KV-cache usage before adding replicas.` | quote }}
+        - alert: VLLMOutOfCapacity
+          expr: |
+            (
+              sum(vllm:num_requests_waiting{ {{- $sel -}} })
+                / clamp_min(count(up{ {{- $sel -}} } == 1), 1)
+              > {{ $a.queue.threshold }}
+            )
+            and on ()
+            (count(up{ {{- $sel -}} } == 1) >= {{ $a.queue.maxReplicas }})
+          for: {{ $a.queue.for }}
+          labels:
+            severity: critical
+          annotations:
+            summary: {{ printf "vLLM queue is above %v per pod at the maximum of %v replica(s)" $a.queue.threshold $a.queue.maxReplicas | quote }}
+            description: {{ `Average waiting requests per pod: {{ $value }}. Autoscaling has no headroom left; raise maxReplicas or add GPU nodes.` | quote }}
+        - alert: VLLMIdleGPU
+          expr: |
+            (sum by (pod) (rate(vllm:request_success_total{ {{- $sel -}} }[{{ $a.idle.window }}])) == 0)
+            and on (pod)
+            (sum by (pod) (vllm:num_requests_running{ {{- $sel -}} }) == 0)
+          for: {{ $a.idle.for }}
+          labels:
+            severity: info
+          annotations:
+            summary: {{ printf "vLLM pod {{ $labels.pod }} has served no requests for %v" $a.idle.for | quote }}
+            description: "A GPU is reserved but idle. On the cloud this is money burned; scale to zero or tear the node down."
+{{- end }}

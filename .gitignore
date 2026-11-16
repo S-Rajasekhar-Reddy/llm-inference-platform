@@ -11,3 +11,4 @@ kubeconfig*
 *.safetensors
 *.bin
 .cache/
+__pycache__/

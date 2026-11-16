@@ -71,3 +71,31 @@ podLabels: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# Prometheus Operator objects. Needs the CRDs from kube-prometheus-stack
+# (`make monitoring-up`); values-local.yaml turns all three on.
+monitoring:
+  serviceMonitor:
+    enabled: false
+    interval: 15s
+    labels: {}
+  dashboard:
+    enabled: false        # ConfigMap labelled grafana_dashboard="1" for the Grafana sidecar
+  alerts:
+    enabled: false
+    labels: {}
+    # 1. Users are waiting: p95 time to first token above the SLO.
+    #    1 s is the draft chat SLO in the design doc; fix it after the E1 saturation run.
+    ttft:
+      sloSeconds: 1
+      for: 5m
+    # 2. Out of capacity: requests queue up although replicas are already at the maximum.
+    #    Keep threshold and maxReplicas equal to the KEDA ScaledObject once it lands.
+    queue:
+      threshold: 5          # average vllm:num_requests_waiting per ready pod
+      maxReplicas: 1
+      for: 2m
+    # 3. Paying for an idle GPU: a ready vLLM pod finished no requests and runs none.
+    idle:
+      window: 5m            # rate() window used to decide "zero requests"
+      for: 30m

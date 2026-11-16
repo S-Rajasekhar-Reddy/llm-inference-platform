@@ -1,0 +1,11 @@
+# nvidia_gpu_exporter (chart 2.19.0, app v1.19.0): GPU utilisation, memory, power and
+# temperature via nvidia-smi. Works on WSL2, where NVIDIA's DCGM exporter does not.
+# The chart requests no nvidia.com/gpu on purpose: the laptop has one, and vLLM needs it.
+runtimeClassName: nvidia
+serviceMonitor:
+  enabled: true
+  interval: 15s
+grafanaDashboard:
+  enabled: true          # the exporter's own GPU dashboards, next to the vLLM one
+prometheusRule:
+  enabled: false         # this repo's alerts live in charts/vllm (PrometheusRule)

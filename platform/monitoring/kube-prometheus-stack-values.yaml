@@ -1,0 +1,61 @@
+# kube-prometheus-stack 93.3.0 on a single-node k3s in WSL2 (laptop-sized).
+# Installed by `make monitoring-up` into the "monitoring" namespace.
+
+# k3s runs these control-plane parts inside the k3s binary and does not expose
+# them for scraping; disabling avoids permanently "down" targets and false alerts.
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+defaultRules:
+  rules:
+    etcd: false
+    kubeControllerManager: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    kubeProxy: false
+
+# WSL2's root filesystem is not a shared mount, so node-exporter's default
+# HostToContainer propagation on the / mount fails with CreateContainerError.
+# Plain (None) propagation still gives filesystem metrics for what is mounted at start.
+prometheus-node-exporter:
+  hostRootFsMount:
+    mountPropagation: ""
+
+prometheus:
+  prometheusSpec:
+    scrapeInterval: 15s
+    evaluationInterval: 15s
+    retention: 2d
+    # Pick up ServiceMonitors and PrometheusRules from every release (vLLM chart,
+    # GPU exporter), not only those labelled for this Helm release.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+
+grafana:
+  # The admin password is generated into the release's secret (never committed).
+  # `make grafana` prints it and port-forwards to http://localhost:3000.
+  adminUser: admin
+  defaultDashboardsTimezone: browser
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL

@@ -40,8 +40,11 @@ Prerequisites: WSL2 (Ubuntu 24.04) with systemd, or Linux; Docker Engine; the NV
 
 ```bash
 make k3s-install     # one time; then: export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+make monitoring-up   # one time: kube-prometheus-stack + GPU exporter
 make up-local        # device plugin, image import, helm upgrade --install charts/vllm, wait for Ready
 make smoke-local     # port-forward + one completion
+make grafana         # dashboard at http://localhost:3000
+make alert-test ALERT=ttft   # force an alert to fire (ttft | queue | idle), then restore
 make down-local      # remove the release (k3s and the caches stay)
 make help            # every target
 ```
@@ -130,14 +133,14 @@ This is open vLLM issue [#54383](https://github.com/vllm-project/vllm/issues/543
 
 ## Layout
 
-Built so far: `Makefile`, `charts/vllm/`, `platform/k3s/`, `bench/`. The rest arrives with the milestones above.
+Built so far: `Makefile`, `charts/vllm/`, `platform/k3s/`, `platform/monitoring/`, `bench/`. The rest arrives with the milestones above.
 
 ```
-├── Makefile                 # built: up-local, down-local, smoke-local, lint; planned: up-cloud, down-cloud, bench
+├── Makefile                 # built: up-local, down-local, smoke-local, lint, monitoring-up, grafana, alert-test; planned: up-cloud, down-cloud, bench
 ├── infra/terraform/         # VPC, EKS, Karpenter, IAM, S3 (cloud run)
-├── charts/vllm/             # built: Helm chart, values-local.yaml; planned: values-cloud.yaml
-├── platform/k3s/            # built: GPU smoke test, NVIDIA device plugin; planned: monitoring values
-├── observability/           # Grafana dashboards, alert rules
+├── charts/vllm/             # built: Helm chart, values-local.yaml, ServiceMonitor, alerts, dashboard JSON; planned: values-cloud.yaml
+├── platform/k3s/            # built: GPU smoke test, NVIDIA device plugin
+├── platform/monitoring/     # built: kube-prometheus-stack + GPU exporter values, alert-test script
 ├── bench/                   # benchmark runner + raw results (never edited by hand)
 └── docs/                    # architecture, decision records
 ```

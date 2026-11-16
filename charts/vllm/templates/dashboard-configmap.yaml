@@ -1,0 +1,12 @@
+{{- if .Values.monitoring.dashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vllm.fullname" . }}-dashboard
+  labels:
+    {{- include "vllm.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  vllm-platform.json: |-
+    {{- .Files.Get "dashboards/vllm-platform.json" | replace "__TTFT_SLO_SECONDS__" (printf "%v" .Values.monitoring.alerts.ttft.sloSeconds) | nindent 4 }}
+{{- end }}

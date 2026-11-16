@@ -3,6 +3,8 @@
 #   make up-local      install/upgrade vLLM on the local k3s cluster (device plugin, image, Helm release)
 #   make smoke-local   port-forward and send one completion
 #   make down-local    remove the vLLM release (keeps k3s, the device plugin and the caches)
+#   make monitoring-up kube-prometheus-stack + GPU exporter (run once, before up-local)
+#   make grafana       port-forward Grafana with the vLLM dashboard
 #   make help          list every target
 #
 # One-time prerequisites: WSL2 with systemd, Docker Engine, NVIDIA Container Toolkit, Helm,
@@ -27,13 +29,23 @@ VLLM_CACHE  ?= $(HOME)/.cache/vllm
 MODEL       ?=
 LOCAL_PORT  ?= 8000
 HELM_EXTRA  ?=
+MON_NS      ?= monitoring
+KPS_VERSION ?= 93.3.0     # kube-prometheus-stack chart
+GPU_EXPORTER_VERSION ?= 2.19.0   # nvidia-gpu-exporter chart (app v1.19.0)
+ALERT       ?=
+
+# helm lint can't fake the Prometheus Operator APIs, so it checks the chart without them;
+# helm template gets them via --api-versions.
+NO_MONITORING   := --set monitoring.serviceMonitor.enabled=false --set monitoring.alerts.enabled=false
+MONITORING_APIS := --api-versions monitoring.coreos.com/v1/ServiceMonitor --api-versions monitoring.coreos.com/v1/PrometheusRule
 
 HELM_LOCAL_ARGS := -f $(CHART)/values-local.yaml \
 	--set cache.hostPath.huggingface=$(HF_CACHE) \
 	--set cache.hostPath.vllm=$(VLLM_CACHE) \
 	$(if $(strip $(MODEL)),--set model.name=$(strip $(MODEL))) $(HELM_EXTRA)
 
-.PHONY: help k3s-install preflight device-plugin image-import up-local down-local smoke-local status gpu-smoke lint
+.PHONY: help k3s-install preflight device-plugin image-import up-local down-local smoke-local status gpu-smoke lint \
+	monitoring-up monitoring-down monitoring-status grafana alert-test
 
 help: ## List targets
 	@grep -hE '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -46,6 +58,7 @@ preflight: ## Check tools, node, nvidia runtime, caches, and leftovers from the 
 	@for t in kubectl helm docker; do command -v $$t >/dev/null || { echo "missing: $$t"; exit 1; }; done
 	kubectl wait --for=condition=Ready node --all --timeout=60s >/dev/null
 	kubectl get runtimeclass nvidia >/dev/null 2>&1 || { echo "no 'nvidia' RuntimeClass: is the NVIDIA Container Toolkit installed? then: sudo systemctl restart k3s"; exit 1; }
+	kubectl get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1 || { echo "Prometheus Operator CRDs missing: run 'make monitoring-up' first"; exit 1; }
 	test -d "$(HF_CACHE)" || { echo "HF cache not found at $(HF_CACHE)"; exit 1; }
 	model="$(strip $(MODEL))"; model="$${model:-$$(awk '/^  name:/{print $$2; exit}' $(CHART)/values.yaml)}"
 	test -d "$(HF_CACHE)/hub/models--$${model//\//--}" || { echo "$$model is not in $(HF_CACHE); the chart runs offline. Download it once first."; exit 1; }
@@ -108,5 +121,34 @@ gpu-smoke: ## Run nvidia-smi in a pod under the nvidia RuntimeClass, then clean 
 	kubectl delete pod gpu-smoke >/dev/null
 
 lint: ## helm lint + render the local values (no cluster needed)
-	@helm lint $(CHART) $(HELM_LOCAL_ARGS)
-	helm template $(RELEASE) $(CHART) $(HELM_LOCAL_ARGS) >/dev/null && echo "template renders"
+	@helm lint $(CHART) $(HELM_LOCAL_ARGS) $(NO_MONITORING)
+	helm template $(RELEASE) $(CHART) $(HELM_LOCAL_ARGS) $(MONITORING_APIS) >/dev/null && echo "template renders"
+	bash -n platform/monitoring/alert-test.sh && bash -n platform/monitoring/prom-api.sh && python3 -m py_compile platform/monitoring/loadgen.py platform/monitoring/promq.py && echo "scripts parse"
+
+monitoring-up: ## Install kube-prometheus-stack + nvidia_gpu_exporter into the monitoring namespace
+	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null 2>&1 || true
+	helm repo update prometheus-community >/dev/null
+	helm upgrade --install kps prometheus-community/kube-prometheus-stack --version $(strip $(KPS_VERSION)) \
+	  -n $(MON_NS) --create-namespace -f platform/monitoring/kube-prometheus-stack-values.yaml --wait --timeout 10m
+	helm upgrade --install nvidia-gpu-exporter oci://ghcr.io/utkuozdemir/charts/nvidia-gpu-exporter \
+	  --version $(strip $(GPU_EXPORTER_VERSION)) -n $(MON_NS) -f platform/monitoring/nvidia-gpu-exporter-values.yaml --wait --timeout 5m
+	kubectl -n $(MON_NS) get pods
+	echo "Monitoring ready. Next: make up-local (adds the vLLM ServiceMonitor, alerts, dashboard), then make grafana"
+
+monitoring-down: ## Remove the monitoring releases (CRDs stay, so the vLLM release keeps working)
+	@helm uninstall nvidia-gpu-exporter -n $(MON_NS) || true
+	helm uninstall kps -n $(MON_NS) || true
+
+monitoring-status: ## Scrape-target health for vLLM and the GPU exporter, plus pending/firing alerts
+	@prom() { platform/monitoring/prom-api.sh "$(MON_NS)" "$$1"; }
+	prom targets | python3 platform/monitoring/promq.py targets
+	prom alerts  | python3 platform/monitoring/promq.py alerts
+
+grafana: ## Print the Grafana admin password and port-forward to http://localhost:3000
+	@echo "user: admin   password: $$(kubectl -n $(MON_NS) get secret kps-grafana -o jsonpath='{.data.admin-password}' | base64 -d)"
+	echo "http://localhost:3000 -> Dashboards -> 'vLLM inference platform' (Ctrl-C to stop)"
+	kubectl -n $(MON_NS) port-forward svc/kps-grafana 3000:80
+
+alert-test: ## Force one alert to fire, then restore thresholds: make alert-test ALERT=ttft|queue|idle
+	@RELEASE=$(RELEASE) NAMESPACE=$(NAMESPACE) CHART=$(CHART) MON_NS=$(MON_NS) LOCAL_PORT=$(LOCAL_PORT) \
+	  HELM_ARGS='$(HELM_LOCAL_ARGS)' platform/monitoring/alert-test.sh $(ALERT)

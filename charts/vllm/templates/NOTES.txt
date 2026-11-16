@@ -1,0 +1,8 @@
+vLLM ({{ .Values.image.tag }}) is serving {{ .Values.model.name }}.
+
+Try it:
+  kubectl port-forward svc/{{ include "vllm.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  curl -s localhost:{{ .Values.service.port }}/v1/completions -H 'Content-Type: application/json' \
+    -d '{"model":"{{ .Values.model.name }}","prompt":"Kubernetes schedules GPUs by","max_tokens":40}'
+
+Or from the repo: make smoke-local

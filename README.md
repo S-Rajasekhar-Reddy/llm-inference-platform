@@ -2,9 +2,9 @@
 
 Production-style LLM serving on Kubernetes with vLLM: autoscaling on queue depth, real observability, and published latency and cost benchmarks.
 
-Built by an infrastructure and security engineer, as a secure, observable, production-grade AI serving platform. The goal is to reproduce it with one command (`make up-local` / `make up-cloud`, coming in weeks 2–3).
+Built by an infrastructure and security engineer, as a secure, observable, production-grade AI serving platform. `make up-local` brings it up on a local k3s cluster with one command; `make up-cloud` follows in week 3.
 
-**Status:** Week 1 of 3; the platform ships Fri 27 Nov. vLLM serves on a local GPU in Docker and on k3s with the GPU scheduled by the NVIDIA device plugin. Helm, monitoring and autoscaling come in week 2, the cloud run in week 3. Built in public; progress is logged below.
+**Status:** Week 2 of 3; the platform ships Fri 27 Nov. vLLM is deployed to k3s by a Helm chart with `make up-local`, the GPU scheduled by the NVIDIA device plugin. Monitoring and autoscaling come next in week 2, the cloud run in week 3. Built in public; progress is logged below.
 
 ## Why this exists
 
@@ -34,7 +34,21 @@ Scaling is driven by `vllm:num_requests_waiting` (queue depth), not GPU utilisat
 
 ## Run it today
 
-What works right now: vLLM in Docker on a single NVIDIA GPU (below), and vLLM on single-node k3s with GPU scheduling (see [`deploy/k8s/`](deploy/k8s/README.md)). Prerequisites: WSL2 (Ubuntu 24.04) or Linux, Docker Engine and the NVIDIA Container Toolkit.
+Prerequisites: WSL2 (Ubuntu 24.04) with systemd, or Linux; Docker Engine; the NVIDIA Container Toolkit; Helm; make (`sudo apt install make`).
+
+**On Kubernetes (k3s), the normal path:**
+
+```bash
+make k3s-install     # one time; then: export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+make up-local        # device plugin, image import, helm upgrade --install charts/vllm, wait for Ready
+make smoke-local     # port-forward + one completion
+make down-local      # remove the release (k3s and the caches stay)
+make help            # every target
+```
+
+Details and what broke on the way: [`platform/k3s/`](platform/k3s/README.md); chart values: [`charts/vllm/`](charts/vllm/README.md).
+
+**In plain Docker, on one GPU:**
 
 ```bash
 # Serve Qwen3-8B-FP8 (the first run downloads about 9 GB of weights into ~/.cache/huggingface)
@@ -64,8 +78,8 @@ OFFLINE=1 bench/coldstart.sh my-run Qwen/Qwen3-8B-FP8 --max-model-len 8192 --gpu
 - [x] vLLM serving an open-weight model on a local GPU (WSL2, RTX 5080 Laptop)
 - [x] Qwen3-8B-FP8 serving, with KV-cache capacity measured on 16 GB
 - [x] Cold start cut from about 35 min to about 2.3 min (weight and compile caches); upstream vLLM data and fix validation ([#54383](https://github.com/vllm-project/vllm/issues/54383), [PR #54479](https://github.com/vllm-project/vllm/pull/54479))
-- [x] k3s on WSL2 with the GPU scheduled by the NVIDIA device plugin; vLLM Deployment + Service serving completions ([`deploy/k8s/`](deploy/k8s/README.md))
-- [ ] (week 2) Helm chart replacing the plain manifests, with `make up-local` / `make down-local`
+- [x] k3s on WSL2 with the GPU scheduled by the NVIDIA device plugin ([`platform/k3s/`](platform/k3s/README.md))
+- [x] Helm chart ([`charts/vllm/`](charts/vllm/README.md)) with `make up-local` / `make down-local` / `make smoke-local`
 - [ ] (week 2) Prometheus/Grafana dashboard: TTFT, inter-token latency, throughput, KV-cache usage, queue depth, GPU utilisation
 - [ ] (week 2) Autoscaling on queue depth with KEDA
 - [ ] (week 3) One AWS EKS run (Terraform, Karpenter, L4): same chart, node autoscaling, cold-start breakdown
@@ -116,14 +130,13 @@ This is open vLLM issue [#54383](https://github.com/vllm-project/vllm/issues/543
 
 ## Layout
 
-`bench/` and `deploy/k8s/` exist today; the rest arrives with the milestones above.
+Built so far: `Makefile`, `charts/vllm/`, `platform/k3s/`, `bench/`. The rest arrives with the milestones above.
 
 ```
-├── Makefile                 # planned: up-local, down-local, up-cloud, down-cloud, bench
+├── Makefile                 # built: up-local, down-local, smoke-local, lint; planned: up-cloud, down-cloud, bench
 ├── infra/terraform/         # VPC, EKS, Karpenter, IAM, S3 (cloud run)
-├── deploy/k8s/              # built: plain k3s manifests (GPU smoke test, device plugin, vLLM)
-├── charts/vllm/             # Helm chart: values-local.yaml, values-cloud.yaml (replaces deploy/k8s)
-├── platform/                # k3s + WSL2 GPU setup, monitoring values
+├── charts/vllm/             # built: Helm chart, values-local.yaml; planned: values-cloud.yaml
+├── platform/k3s/            # built: GPU smoke test, NVIDIA device plugin; planned: monitoring values
 ├── observability/           # Grafana dashboards, alert rules
 ├── bench/                   # benchmark runner + raw results (never edited by hand)
 └── docs/                    # architecture, decision records
@@ -131,8 +144,9 @@ This is open vLLM issue [#54383](https://github.com/vllm-project/vllm/issues/543
 
 ## Progress log
 
+- **2026-11-16:** Helm chart `charts/vllm` replaces the plain manifests; `make up-local` runs preflight checks, deploys the NVIDIA device plugin, imports the pinned image from Docker into k3s and installs the release. Cache paths come from `$HOME` instead of being hard-coded; `enableServiceLinks: false` is built into the chart.
 - **2026-11-12:** Plan compressed after week 1 ran ahead: the platform now ships Fri 27 Nov (was 11 Dec); the cloud run moves to week 3.
-- **2026-11-11:** vLLM serving on k3s (WSL2) with the GPU scheduled by NVIDIA device plugin v0.20.1, which detects WSL2. Fixed a crash loop: a Service named `vllm` makes Kubernetes inject `VLLM_PORT=tcp://…`, which vLLM reads as its own setting (`enableServiceLinks: false`). The compile cache carried over through a hostPath volume. Details in [`deploy/k8s/`](deploy/k8s/README.md).
+- **2026-11-11:** vLLM serving on k3s (WSL2) with the GPU scheduled by NVIDIA device plugin v0.20.1, which detects WSL2. Fixed a crash loop: a Service named `vllm` makes Kubernetes inject `VLLM_PORT=tcp://…`, which vLLM reads as its own setting (`enableServiceLinks: false`). The compile cache carried over through a hostPath volume. Details in [`platform/k3s/`](platform/k3s/README.md).
 - **2026-11-10:** Cold start for Qwen3-8B-FP8 cut from about 35 min to 135–145 s by caching weights locally, persisting vLLM's compile cache and running Hugging Face offline. Measured with `bench/coldstart.sh`; remaining time is CUDA graph capture. Reported the first-boot KV-cache gap upstream and validated fix PR #54479 on v0.33.0.
 - **2026-11-09:** vLLM `v0.33.0` serving Qwen3-1.7B and Qwen3-8B-FP8 on the RTX 5080 Laptop GPU in WSL2. Blackwell (SM_120) works out of the box, including native FP8 kernels. Cold starts are dominated by weight download (12.9 min for 1.7B, 33 min for 8B on a home connection), which is why the platform caches weights. Baseline benchmarks above.
 - **2026-11-08:** Repo created.

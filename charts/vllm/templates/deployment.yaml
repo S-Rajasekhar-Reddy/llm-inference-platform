@@ -1,0 +1,132 @@
+{{- if and (eq .Values.cache.type "hostPath") (or (not .Values.cache.hostPath.huggingface) (not .Values.cache.hostPath.vllm)) }}
+{{- fail "cache.type=hostPath needs cache.hostPath.huggingface and cache.hostPath.vllm (make up-local sets them from $HOME)" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vllm.fullname" . }}
+  labels:
+    {{- include "vllm.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    {{- toYaml .Values.strategy | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "vllm.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vllm.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.runtimeClassName }}
+      runtimeClassName: {{ . }}
+      {{- end }}
+      # Kubernetes injects <SERVICE>_PORT=tcp://<ip>:<port> for every Service. A Service whose
+      # name starts with "vllm" sets VLLM_PORT, which vLLM reads as its own setting and crashes
+      # (found on k3s, 11 Nov). Nothing here uses those variables; Services resolve through DNS.
+      enableServiceLinks: false
+      containers:
+        - name: vllm
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --model
+            - {{ .Values.model.name | quote }}
+            - --max-model-len
+            - {{ .Values.model.maxModelLen | quote }}
+            {{- if .Values.model.kvCacheMemoryBytes }}
+            - --kv-cache-memory
+            - {{ int64 .Values.model.kvCacheMemoryBytes | quote }}
+            {{- else }}
+            - --gpu-memory-utilization
+            - {{ .Values.model.gpuMemoryUtilization | quote }}
+            {{- end }}
+            {{- range .Values.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          env:
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            {{- if .Values.hfOffline }}
+            - name: HF_HUB_OFFLINE
+              value: "1"
+            {{- end }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          resources:
+            {{- $res := deepCopy (.Values.resources | default dict) }}
+            {{- if .Values.gpu.request }}
+            {{- $limits := get $res "limits" | default dict }}
+            {{- $_ := set $limits "nvidia.com/gpu" .Values.gpu.count }}
+            {{- $_ := set $res "limits" $limits }}
+            {{- end }}
+            {{- toYaml $res | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /root/.cache/huggingface
+            - name: vllm-cache
+              mountPath: /root/.cache/vllm
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        {{- if eq .Values.cache.type "hostPath" }}
+        - name: hf-cache
+          hostPath:
+            path: {{ .Values.cache.hostPath.huggingface }}
+            type: Directory
+        - name: vllm-cache
+          hostPath:
+            path: {{ .Values.cache.hostPath.vllm }}
+            type: DirectoryOrCreate
+        {{- else }}
+        - name: hf-cache
+          emptyDir: {}
+        - name: vllm-cache
+          emptyDir: {}
+        {{- end }}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.shm.sizeLimit }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

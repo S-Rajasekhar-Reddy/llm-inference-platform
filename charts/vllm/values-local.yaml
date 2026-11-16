@@ -1,0 +1,6 @@
+# k3s inside WSL2, one RTX 5080 Laptop GPU (16 GB).
+# make up-local fills cache.hostPath.* from $HOME, so nothing here is user-specific.
+runtimeClassName: nvidia
+hfOffline: true           # weights are already cached locally
+cache:
+  type: hostPath

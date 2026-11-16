@@ -1,5 +1,5 @@
 # Smallest possible GPU check: run nvidia-smi once under the nvidia runtime.
-# kubectl apply -f deploy/k8s/00-gpu-smoke-test.yaml && kubectl logs -f gpu-smoke
+# kubectl apply -f platform/k3s/00-gpu-smoke-test.yaml && kubectl logs -f gpu-smoke
 apiVersion: v1
 kind: Pod
 metadata:

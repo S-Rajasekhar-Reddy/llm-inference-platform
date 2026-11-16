@@ -1,0 +1,73 @@
+# Defaults are environment-neutral. Environment files layer on top:
+#   values-local.yaml  k3s in WSL2 on the RTX 5080 Laptop GPU (hostPath caches)
+#   values-cloud.yaml  EKS with an L4 node (week 3)
+
+image:
+  repository: vllm/vllm-openai
+  tag: v0.33.0            # pinned; bump deliberately
+  pullPolicy: IfNotPresent
+
+model:
+  name: Qwen/Qwen3-1.7B
+  maxModelLen: 8192
+  gpuMemoryUtilization: 0.85
+  # Pin KV-cache bytes for benchmarks so capacity does not change between
+  # cold and warm boots (vllm#54383). Empty = let vLLM size it.
+  kvCacheMemoryBytes: ""
+
+# Extra vLLM CLI flags, appended as-is, e.g. ["--kv-cache-dtype", "fp8"]
+extraArgs: []
+
+# Extra environment variables for the vLLM container
+env: []
+
+# Set HF_HUB_OFFLINE=1 once weights are in the cache (skips Hugging Face network checks)
+hfOffline: false
+
+replicaCount: 1
+
+# With one GPU a rolling update would start a second pod that cannot fit,
+# so the default replaces the pod instead (brief downtime, no OOM).
+strategy:
+  type: Recreate
+
+runtimeClassName: ""      # "nvidia" on k3s; empty on EKS (the GPU AMI sets the default runtime)
+
+gpu:
+  # Request the GPU through the NVIDIA device plugin (nvidia.com/gpu).
+  # Set false only where the plugin cannot run; the pod then relies on runtimeClassName alone.
+  request: true
+  count: 1
+
+resources: {}             # CPU/memory requests and limits, merged with the GPU limit
+
+service:
+  type: ClusterIP
+  port: 8000
+
+# Caches survive pod restarts so weights are not re-downloaded and
+# torch.compile results are reused (cold start ~35 min -> ~2.3 min on the laptop).
+cache:
+  type: emptyDir          # hostPath | emptyDir
+  hostPath:
+    huggingface: ""       # e.g. /home/<user>/.cache/huggingface (set by make up-local)
+    vllm: ""              # e.g. /home/<user>/.cache/vllm
+
+shm:
+  sizeLimit: 2Gi          # replaces Docker's --ipc=host
+
+probes:
+  startup:
+    periodSeconds: 5
+    failureThreshold: 120 # up to 10 min for a cold compile and CUDA graph capture
+  readiness:
+    periodSeconds: 10
+  liveness:
+    periodSeconds: 20
+    failureThreshold: 3
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

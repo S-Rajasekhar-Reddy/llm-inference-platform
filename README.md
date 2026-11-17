@@ -4,7 +4,7 @@ Production-style LLM serving on Kubernetes with vLLM: autoscaling on queue depth
 
 Built by an infrastructure and security engineer, as a secure, observable, production-grade AI serving platform. `make up-local` brings it up on a local k3s cluster with one command; `make up-cloud` follows in week 3.
 
-**Status:** Week 2 of 3; the platform ships Fri 27 Nov. vLLM is deployed to k3s by a Helm chart with `make up-local`, the GPU scheduled by the NVIDIA device plugin. Prometheus/Grafana monitoring with three tested alerts is in; KEDA autoscaling comes next in week 2, the cloud run in week 3. Built in public; progress is logged below.
+**Status:** Week 2 of 3; the platform ships Fri 27 Nov. vLLM is deployed to k3s by a Helm chart with `make up-local`, the GPU scheduled by the NVIDIA device plugin. Prometheus/Grafana monitoring with three tested alerts and KEDA queue-depth autoscaling (1 → 2 replicas on one time-sliced GPU) are in, and the EKS cloud run is written in Terraform (plan only) for week 3. Built in public; progress is logged below.
 
 ## Why this exists
 
@@ -86,8 +86,9 @@ OFFLINE=1 bench/coldstart.sh my-run Qwen/Qwen3-8B-FP8 --max-model-len 8192 --gpu
 - [x] k3s on WSL2 with the GPU scheduled by the NVIDIA device plugin ([`platform/k3s/`](platform/k3s/README.md))
 - [x] Helm chart ([`charts/vllm/`](charts/vllm/README.md)) with `make up-local` / `make down-local` / `make smoke-local`
 - [x] Prometheus/Grafana dashboard (TTFT, inter-token latency, throughput, KV-cache usage, queue depth, GPU utilisation) and three alerts, each fired in a forced test ([`platform/monitoring/`](platform/monitoring/README.md))
-- [ ] (week 2) Autoscaling on queue depth with KEDA
-- [ ] (week 3) One AWS EKS run (Terraform, Karpenter, L4): same chart, node autoscaling, cold-start breakdown
+- [x] Autoscaling on queue depth with KEDA: 1 → 2 → 1 replicas on one time-sliced GPU, tested with `make scale-test` ([`platform/autoscaling/`](platform/autoscaling/README.md))
+- [x] Terraform for the cloud run: VPC, EKS, Karpenter, S3 weights bucket, budget alerts; `terraform plan` passes, nothing applied ([`infra/terraform/`](infra/terraform/README.md))
+- [ ] (week 3) One AWS EKS run (apply, Karpenter GPU node, L4): same chart, node autoscaling, cold-start breakdown
 - [ ] (week 3) Benchmark write-up: laptop vs cloud L4, cost per 1M output tokens (cloud)
 
 ## Results so far
@@ -151,6 +152,7 @@ Built so far: `Makefile`, `charts/vllm/`, `platform/k3s/`, `platform/monitoring/
 
 ## Progress log
 
+- **2026-11-17:** KEDA scales vLLM on `sum(vllm:num_requests_waiting)` (5 per replica, 1–2 replicas); the NVIDIA device plugin time-slices the GPU into 2, and each pod gets 0.4 of the GPU plus a pinned 1.5 GiB KV cache. `make scale-test` (512 concurrent, in-cluster): KEDA asked for 2 replicas 12 s after load started, the second pod was Ready about 2.5 min later, and it scaled back to 1 about 2 min after the queue emptied. Finding: on one shared GPU the second replica did not raise throughput (the GPU was already at 100% and each KV cache filled), so it proves the scaling loop, not extra capacity; that comes from a second GPU node in the cloud run. Terraform for VPC, EKS, Karpenter, S3 and budget alerts passes `terraform plan` (not applied).
 - **2026-11-16 (pm):** Monitoring: `make monitoring-up` installs kube-prometheus-stack and nvidia_gpu_exporter; the vLLM chart adds a ServiceMonitor, three alerts and a Grafana dashboard. `make alert-test` forced each alert to fire (TTFT SLO, out of capacity at max replicas, idle GPU). WSL2 fixes: node-exporter's root mount propagation, and Prometheus queries through a short port-forward.
 - **2026-11-16:** Helm chart `charts/vllm` replaces the plain manifests; `make up-local` runs preflight checks, deploys the NVIDIA device plugin, imports the pinned image from Docker into k3s and installs the release. Cache paths come from `$HOME` instead of being hard-coded; `enableServiceLinks: false` is built into the chart.
 - **2026-11-12:** Plan compressed after week 1 ran ahead: the platform now ships Fri 27 Nov (was 11 Dec); the cloud run moves to week 3.

@@ -41,10 +41,12 @@ Prerequisites: WSL2 (Ubuntu 24.04) with systemd, or Linux; Docker Engine; the NV
 ```bash
 make k3s-install     # one time; then: export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 make monitoring-up   # one time: kube-prometheus-stack + GPU exporter
+make keda-up         # one time: KEDA for queue-depth autoscaling
 make up-local        # device plugin, image import, helm upgrade --install charts/vllm, wait for Ready
 make smoke-local     # port-forward + one completion
 make grafana         # dashboard at http://localhost:3000
 make alert-test ALERT=ttft   # force an alert to fire (ttft | queue | idle), then restore
+make scale-test      # load past the queue threshold; watch 1 -> 2 -> 1 replicas
 make down-local      # remove the release (k3s and the caches stay)
 make help            # every target
 ```
@@ -137,10 +139,12 @@ Built so far: `Makefile`, `charts/vllm/`, `platform/k3s/`, `platform/monitoring/
 
 ```
 ├── Makefile                 # built: up-local, down-local, smoke-local, lint, monitoring-up, grafana, alert-test; planned: up-cloud, down-cloud, bench
-├── infra/terraform/         # VPC, EKS, Karpenter, IAM, S3 (cloud run)
+├── infra/terraform/         # built (plan only): VPC, EKS, Karpenter, S3 weights bucket, $20 budget alerts
+├── platform/eks/            # built: Karpenter GPU NodePool (g6.xlarge, on-demand)
 ├── charts/vllm/             # built: Helm chart, values-local.yaml, ServiceMonitor, alerts, dashboard JSON; planned: values-cloud.yaml
 ├── platform/k3s/            # built: GPU smoke test, NVIDIA device plugin
 ├── platform/monitoring/     # built: kube-prometheus-stack + GPU exporter values, alert-test script
+├── platform/autoscaling/    # built: scale-test (in-cluster load, KEDA 1 -> 2 -> 1)
 ├── bench/                   # benchmark runner + raw results (never edited by hand)
 └── docs/                    # architecture, decision records
 ```

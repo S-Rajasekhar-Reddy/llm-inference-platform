@@ -2,11 +2,20 @@
 .terraform/
 *.tfstate
 *.tfstate.*
+.terraform.tfstate.lock.info
 *.tfvars
+*.tfvars.json
+tfplan
+*.tfplan
+crash.log
+crash.*.log
+# keep: terraform.tfvars.example and .terraform.lock.hcl are committed on purpose
+
 # Secrets and local env
 .env
 *.pem
 kubeconfig*
+
 # Model weights and caches (never commit)
 *.safetensors
 *.bin

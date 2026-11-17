@@ -8,7 +8,9 @@ metadata:
   labels:
     {{- include "vllm.labels" . | nindent 4 }}
 spec:
+  {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
+  {{- end }}
   strategy:
     {{- toYaml .Values.strategy | nindent 4 }}
   selector:
@@ -42,12 +44,11 @@ spec:
             - {{ .Values.model.name | quote }}
             - --max-model-len
             - {{ .Values.model.maxModelLen | quote }}
+            - --gpu-memory-utilization
+            - {{ .Values.model.gpuMemoryUtilization | quote }}
             {{- if .Values.model.kvCacheMemoryBytes }}
             - --kv-cache-memory
             - {{ int64 .Values.model.kvCacheMemoryBytes | quote }}
-            {{- else }}
-            - --gpu-memory-utilization
-            - {{ .Values.model.gpuMemoryUtilization | quote }}
             {{- end }}
             {{- range .Values.extraArgs }}
             - {{ . | quote }}

@@ -1,0 +1,33 @@
+{{- if .Values.autoscaling.enabled }}
+{{- if not (.Capabilities.APIVersions.Has "keda.sh/v1alpha1/ScaledObject") }}
+{{- fail "autoscaling.enabled needs the KEDA CRDs: run `make keda-up` first" }}
+{{- end }}
+{{- $a := .Values.autoscaling }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "vllm.fullname" . }}
+  labels:
+    {{- include "vllm.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ include "vllm.fullname" . }}
+  minReplicaCount: {{ $a.minReplicaCount }}
+  maxReplicaCount: {{ $a.maxReplicaCount }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+        scaleDown:
+          stabilizationWindowSeconds: {{ $a.scaleDownStabilizationSeconds }}
+  triggers:
+    # Requests waiting for a slot across all replicas. The prometheus trigger is an
+    # AverageValue metric, so the HPA aims for queueThreshold waiting requests per replica.
+    - type: prometheus
+      metadata:
+        serverAddress: {{ $a.prometheusAddress }}
+        query: sum(vllm:num_requests_waiting{job="{{ include "vllm.fullname" . }}", namespace="{{ .Release.Namespace }}"})
+        threshold: {{ $a.queueThreshold | quote }}
+        ignoreNullValues: "true"
+{{- end }}

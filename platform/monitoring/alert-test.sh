@@ -16,7 +16,8 @@ case "$ALERT" in
          LOAD="--concurrency 8 --duration 300 --max-tokens 64" ;;
   queue) NAME=VLLMOutOfCapacity
          # More concurrent requests than vLLM's default max_num_seqs (256), so some must wait.
-         OVERRIDES="--set monitoring.alerts.queue.threshold=0 --set monitoring.alerts.queue.for=30s"
+         # With KEDA on, it fires once the second replica is up and requests still wait.
+         OVERRIDES="--set monitoring.alerts.queue.threshold=0.5 --set monitoring.alerts.queue.for=30s"
          LOAD="--concurrency 512 --duration 300 --max-tokens 512" ;;
   idle)  NAME=VLLMIdleGPU
          OVERRIDES="--set monitoring.alerts.idle.window=1m --set monitoring.alerts.idle.for=2m"

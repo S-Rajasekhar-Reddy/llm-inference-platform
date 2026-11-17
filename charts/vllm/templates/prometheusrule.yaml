@@ -3,6 +3,15 @@
 {{- fail "monitoring.alerts.enabled needs the Prometheus Operator CRDs: run `make monitoring-up` first" }}
 {{- end }}
 {{- $a := .Values.monitoring.alerts }}
+{{- /* queue alert: explicit values win, else follow KEDA, else 5 waiting at 1 replica */}}
+{{- $qThreshold := 5 }}
+{{- $qMax := 1 }}
+{{- if .Values.autoscaling.enabled }}
+{{- $qThreshold = .Values.autoscaling.queueThreshold }}
+{{- $qMax = .Values.autoscaling.maxReplicaCount }}
+{{- end }}
+{{- if $a.queue.threshold }}{{ $qThreshold = $a.queue.threshold }}{{ end }}
+{{- if $a.queue.maxReplicas }}{{ $qMax = $a.queue.maxReplicas }}{{ end }}
 {{- $sel := printf "job=\"%s\", namespace=\"%s\"" (include "vllm.fullname" .) .Release.Namespace }}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -33,15 +42,15 @@ spec:
             (
               sum(vllm:num_requests_waiting{ {{- $sel -}} })
                 / clamp_min(count(up{ {{- $sel -}} } == 1), 1)
-              > {{ $a.queue.threshold }}
+              > {{ $qThreshold }}
             )
             and on ()
-            (count(up{ {{- $sel -}} } == 1) >= {{ $a.queue.maxReplicas }})
+            (count(up{ {{- $sel -}} } == 1) >= {{ $qMax }})
           for: {{ $a.queue.for }}
           labels:
             severity: critical
           annotations:
-            summary: {{ printf "vLLM queue is above %v per pod at the maximum of %v replica(s)" $a.queue.threshold $a.queue.maxReplicas | quote }}
+            summary: {{ printf "vLLM queue is above %v per pod at the maximum of %v replica(s)" $qThreshold $qMax | quote }}
             description: {{ `Average waiting requests per pod: {{ $value }}. Autoscaling has no headroom left; raise maxReplicas or add GPU nodes.` | quote }}
         - alert: VLLMIdleGPU
           expr: |

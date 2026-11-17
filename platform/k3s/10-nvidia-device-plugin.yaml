@@ -2,6 +2,25 @@
 # modified for k3s: k3s keeps runc as the default runtime, so the plugin pod must
 # run under the nvidia RuntimeClass to see the GPU. v0.19.1+ reports a single
 # "all" device on WSL2.
+#
+# Time-slicing: the one GPU is advertised as nvidia.com/gpu: 2, so two vLLM pods
+# can share it (each pins its own memory budget; there is no isolation between them).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nvidia-device-plugin-config
+  namespace: kube-system
+data:
+  config.yaml: |
+    version: v1
+    sharing:
+      timeSlicing:
+        renameByDefault: false
+        failRequestsGreaterThanOne: true
+        resources:
+          - name: nvidia.com/gpu
+            replicas: 2
+---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -17,6 +36,9 @@ spec:
     metadata:
       labels:
         name: nvidia-device-plugin-ds
+      annotations:
+        # bump when the ConfigMap changes, so the DaemonSet rolls and re-reads it
+        llm-inference-platform/config-version: "timeslicing-2"
     spec:
       runtimeClassName: nvidia
       tolerations:
@@ -32,6 +54,8 @@ spec:
               value: all
             - name: FAIL_ON_INIT_ERROR
               value: "false"
+            - name: CONFIG_FILE
+              value: /etc/nvidia-device-plugin/config.yaml
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -39,7 +63,13 @@ spec:
           volumeMounts:
             - name: kubelet-device-plugins-dir
               mountPath: /var/lib/kubelet/device-plugins
+            - name: config
+              mountPath: /etc/nvidia-device-plugin
+              readOnly: true
       volumes:
+        - name: config
+          configMap:
+            name: nvidia-device-plugin-config
         - name: kubelet-device-plugins-dir
           hostPath:
             path: /var/lib/kubelet/device-plugins

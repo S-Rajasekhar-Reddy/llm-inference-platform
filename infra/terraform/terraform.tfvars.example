@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars (git-ignored) and fill in.
+owner               = "sai"
+api_allowed_cidrs   = ["203.0.113.10/32"] # your public IP: curl -s https://checkip.amazonaws.com
+budget_alert_emails = ["you@example.com"]
+
+# Optional overrides
+# region             = "us-east-1"
+# kubernetes_version = "1.34"

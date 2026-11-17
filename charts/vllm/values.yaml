@@ -10,9 +10,12 @@ image:
 model:
   name: Qwen/Qwen3-1.7B
   maxModelLen: 8192
+  # Always passed. vLLM checks at startup that this share of total GPU memory is
+  # free, even when kvCacheMemoryBytes pins the KV cache, so two pods sharing a GPU
+  # each need a value that fits next to the other (values-local.yaml: 0.4).
   gpuMemoryUtilization: 0.85
-  # Pin KV-cache bytes for benchmarks so capacity does not change between
-  # cold and warm boots (vllm#54383). Empty = let vLLM size it.
+  # Pin KV-cache bytes so capacity does not change between cold and warm boots
+  # (vllm#54383) and so two replicas get the same budget. Empty = vLLM sizes it.
   kvCacheMemoryBytes: ""
 
 # Extra vLLM CLI flags, appended as-is, e.g. ["--kv-cache-dtype", "fp8"]
@@ -24,7 +27,7 @@ env: []
 # Set HF_HUB_OFFLINE=1 once weights are in the cache (skips Hugging Face network checks)
 hfOffline: false
 
-replicaCount: 1
+replicaCount: 1            # ignored when autoscaling.enabled (KEDA owns replicas)
 
 # With one GPU a rolling update would start a second pod that cannot fit,
 # so the default replaces the pod instead (brief downtime, no OOM).
@@ -90,12 +93,26 @@ monitoring:
       sloSeconds: 1
       for: 5m
     # 2. Out of capacity: requests queue up although replicas are already at the maximum.
-    #    Keep threshold and maxReplicas equal to the KEDA ScaledObject once it lands.
+    #    Empty = follow autoscaling.queueThreshold / maxReplicaCount (or 5 and 1 without KEDA).
     queue:
-      threshold: 5          # average vllm:num_requests_waiting per ready pod
-      maxReplicas: 1
+      threshold: ""         # average vllm:num_requests_waiting per ready pod
+      maxReplicas: ""
       for: 2m
     # 3. Paying for an idle GPU: a ready vLLM pod finished no requests and runs none.
     idle:
       window: 5m            # rate() window used to decide "zero requests"
       for: 30m
+
+# KEDA scales the Deployment on queue depth (vllm:num_requests_waiting) read from
+# Prometheus. Needs the KEDA CRDs (`make keda-up`). When enabled, monitoring.alerts.queue
+# takes its threshold and max replicas from here, so the alert and the scaler agree.
+autoscaling:
+  enabled: false
+  minReplicaCount: 1
+  maxReplicaCount: 2
+  queueThreshold: 5         # target waiting requests per replica (AverageValue)
+  # With minReplicaCount >= 1 the HPA does the scaling (it reads KEDA's metric every
+  # 15 s), so KEDA's pollingInterval/cooldownPeriod don't apply and aren't set; scale-down
+  # timing is this stabilisation window.
+  scaleDownStabilizationSeconds: 120
+  prometheusAddress: http://kps-kube-prometheus-stack-prometheus.monitoring.svc:9090

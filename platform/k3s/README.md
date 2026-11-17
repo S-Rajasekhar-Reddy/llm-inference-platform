@@ -7,7 +7,7 @@ the same chart runs on EKS in week 3.
 | File | What it does |
 |---|---|
 | `00-gpu-smoke-test.yaml` | Runs `nvidia-smi` once under the `nvidia` RuntimeClass (`make gpu-smoke`). If this prints the GPU, the runtime plumbing works. |
-| `10-nvidia-device-plugin.yaml` | NVIDIA device plugin v0.20.1, modified to run under the `nvidia` RuntimeClass (k3s keeps runc as default). Advertises `nvidia.com/gpu` on the node. Applied by `make up-local`. |
+| `10-nvidia-device-plugin.yaml` | NVIDIA device plugin v0.20.1, modified to run under the `nvidia` RuntimeClass (k3s keeps runc as default). Time-slicing config advertises the one GPU as `nvidia.com/gpu: 2`, so two vLLM replicas can share it (no memory isolation). Applied by `make up-local`. |
 
 ## Run it
 

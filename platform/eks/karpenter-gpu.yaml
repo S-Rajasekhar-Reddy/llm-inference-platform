@@ -1,0 +1,58 @@
+# GPU capacity for the cloud run, applied after `terraform apply` (week 3):
+#   CLUSTER_NAME=llm-inference NODE_ROLE=llm-inference-karpenter-node OWNER=sai \
+#     envsubst < platform/eks/karpenter-gpu.yaml | kubectl apply -f -
+# Bottlerocket's NVIDIA variant (picked automatically for GPU instances) ships the
+# driver and the NVIDIA device plugin, so GPU pods schedule with no extra DaemonSet.
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: gpu
+spec:
+  amiSelectorTerms:
+    - alias: bottlerocket@latest
+  role: ${NODE_ROLE}
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: ${CLUSTER_NAME}
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: ${CLUSTER_NAME}
+  blockDeviceMappings:
+    - deviceName: /dev/xvdb          # Bottlerocket data volume: images + model weights
+      ebs:
+        volumeSize: 100Gi
+        volumeType: gp3
+        encrypted: true
+        deleteOnTermination: true
+  tags:                              # Karpenter launches these instances itself, so the
+    karpenter.sh/discovery: ${CLUSTER_NAME}   # provider's default_tags don't reach them
+    owner: ${OWNER}
+    project: llm-inference-platform
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: gpu
+spec:
+  template:
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: gpu
+      requirements:
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["g6.xlarge"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]      # decision D3: no spot for a short benchmark run
+      taints:
+        - key: nvidia.com/gpu
+          effect: NoSchedule
+      expireAfter: 24h
+  limits:
+    cpu: 8                           # = the 8 vCPU G/VT quota: at most 2x g6.xlarge
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 5m             # an idle GPU node is gone 5 min after its last pod

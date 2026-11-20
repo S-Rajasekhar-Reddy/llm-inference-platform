@@ -51,7 +51,7 @@ HELM_LOCAL_ARGS := -f $(CHART)/values-local.yaml \
 	$(if $(strip $(MODEL)),--set model.name=$(strip $(MODEL))) $(HELM_EXTRA)
 
 .PHONY: help k3s-install preflight device-plugin image-import up-local down-local smoke-local status gpu-smoke lint \
-	monitoring-up monitoring-down monitoring-status grafana alert-test keda-up keda-down scale-test tf-init tf-plan
+	monitoring-up monitoring-down monitoring-status grafana alert-test keda-up keda-down scale-test tf-init tf-plan bench-replicas
 
 help: ## List targets
 	@grep -hE '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -132,7 +132,7 @@ gpu-smoke: ## Run nvidia-smi in a pod under the nvidia RuntimeClass, then clean 
 lint: ## helm lint + render the local values (no cluster needed)
 	@helm lint $(CHART) $(HELM_LOCAL_ARGS) $(NO_MONITORING)
 	helm template $(RELEASE) $(CHART) $(HELM_LOCAL_ARGS) $(MONITORING_APIS) >/dev/null && echo "template renders"
-	bash -n platform/monitoring/alert-test.sh && bash -n platform/monitoring/prom-api.sh && bash -n platform/autoscaling/scale-test.sh && python3 -m py_compile platform/monitoring/loadgen.py platform/monitoring/promq.py && echo "scripts parse"
+	bash -n platform/monitoring/alert-test.sh && bash -n platform/monitoring/prom-api.sh && bash -n platform/autoscaling/scale-test.sh && bash -n bench/replicas-same-gpu.sh && python3 -m py_compile platform/monitoring/loadgen.py platform/monitoring/promq.py && echo "scripts parse"
 
 monitoring-up: ## Install kube-prometheus-stack + nvidia_gpu_exporter into the monitoring namespace
 	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null 2>&1 || true
@@ -175,6 +175,10 @@ keda-down: ## Remove KEDA (delete the vLLM release's ScaledObject first: make up
 scale-test: ## Load past the queue threshold and watch KEDA scale 1 -> 2 -> 1 (about 10 min)
 	@RELEASE=$(RELEASE) NAMESPACE=$(NAMESPACE) MON_NS=$(MON_NS) VLLM_IMAGE=$(VLLM_IMAGE) \
 	  platform/autoscaling/scale-test.sh
+
+bench-replicas: ## Same model on one GPU: 1 vs 2 replicas vs 1 full-GPU replica (about 20 min; KEDA paused, then restored)
+	@RELEASE=$(RELEASE) NAMESPACE=$(NAMESPACE) CHART=$(CHART) MON_NS=$(MON_NS) VLLM_IMAGE=$(VLLM_IMAGE) \
+	  HELM_ARGS='$(HELM_LOCAL_ARGS)' bench/replicas-same-gpu.sh
 
 tf-init: ## terraform init + fmt check + validate for the EKS cloud run (no AWS changes)
 	@command -v terraform >/dev/null || { echo "missing: terraform (>= 1.6)"; exit 1; }

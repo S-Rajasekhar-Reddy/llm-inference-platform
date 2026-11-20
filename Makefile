@@ -176,7 +176,7 @@ scale-test: ## Load past the queue threshold and watch KEDA scale 1 -> 2 -> 1 (a
 	@RELEASE=$(RELEASE) NAMESPACE=$(NAMESPACE) MON_NS=$(MON_NS) VLLM_IMAGE=$(VLLM_IMAGE) \
 	  platform/autoscaling/scale-test.sh
 
-bench-replicas: ## Same model on one GPU: 1 vs 2 replicas vs 1 full-GPU replica (about 20 min; KEDA paused, then restored)
+bench-replicas: ## Same model on one GPU: 1 vs 2 replicas vs 1 full-GPU replica, REPEATS=3 (about 55 min; KEDA paused, then restored)
 	@RELEASE=$(RELEASE) NAMESPACE=$(NAMESPACE) CHART=$(CHART) MON_NS=$(MON_NS) VLLM_IMAGE=$(VLLM_IMAGE) \
 	  HELM_ARGS='$(HELM_LOCAL_ARGS)' bench/replicas-same-gpu.sh
 

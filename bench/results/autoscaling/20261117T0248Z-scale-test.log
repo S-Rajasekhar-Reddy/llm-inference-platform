@@ -1,0 +1,53 @@
+# make scale-test, 2026-11-17 (times UTC). 512 concurrent requests, max_tokens 512, Qwen3-1.7B,
+# 2 replicas max on one time-sliced RTX 5080 Laptop GPU (0.4 utilisation + 1.5 GiB KV each), KEDA threshold 5 waiting per replica.
+allocatable nvidia.com/gpu: 2 (needs 2)
+02:48:51  before   replicas 1/1 ready   waiting 0      running 0
+02:49:03  load     replicas 2/1 ready   waiting 455    running 57
+02:49:14  load     replicas 2/1 ready   waiting 481    running 31
+02:49:24  load     replicas 2/1 ready   waiting 481    running 36
+02:49:36  load     replicas 2/1 ready   waiting 475    running 36
+02:49:48  load     replicas 2/1 ready   waiting 474    running 38
+02:49:58  load     replicas 2/1 ready   waiting 480    running 32
+02:50:09  load     replicas 2/1 ready   waiting 472    running 40
+02:50:19  load     replicas 2/1 ready   waiting 472    running 40
+02:50:31  load     replicas 2/1 ready   waiting 472    running 39
+02:50:42  load     replicas 2/1 ready   waiting 477    running 35
+02:50:52  load     replicas 2/1 ready   waiting 472    running 40
+02:51:04  load     replicas 2/1 ready   waiting 472    running 36
+02:51:16  load     replicas 2/1 ready   waiting 476    running 36
+02:51:25  load     replicas 2/1 ready   waiting 480    running 32
+02:51:37  load     replicas 2/2 ready   waiting 461    running 47
+02:51:49  load     replicas 2/2 ready   waiting 427    running 77
+02:51:59  load     replicas 2/2 ready   waiting 427    running 87
+02:52:10  load     replicas 2/2 ready   waiting 380    running 133
+02:52:20  load     replicas 2/2 ready   waiting 361    running 151
+02:52:32  load     replicas 2/2 ready   waiting 433    running 74
+02:52:44  load     replicas 2/2 ready   waiting 433    running 76
+02:52:53  load     replicas 2/2 ready   waiting 437    running 70
+02:53:05  load     replicas 2/2 ready   waiting 440    running 74
+02:53:17  load     replicas 2/2 ready   waiting 429    running 83
+02:53:27  load     replicas 2/2 ready   waiting 416    running 97
+02:53:38  load     replicas 2/2 ready   waiting 416    running 94
+02:53:50  load     replicas 2/2 ready   waiting 361    running 153
+02:54:00  load     replicas 2/2 ready   waiting 450    running 69
+02:54:12  load     replicas 2/2 ready   waiting 429    running 83
+02:54:24  load     replicas 2/2 ready   waiting 386    running 124
+02:54:33  load     replicas 2/2 ready   waiting 386    running 109
+02:54:45  load     replicas 2/2 ready   waiting 455    running 57
+02:54:55  load     replicas 2/2 ready   waiting 444    running 69
+02:55:07  load     replicas 2/2 ready   waiting 400    running 51
+02:55:18  load     replicas 2/2 ready   waiting 400    running 46
+load: 512 workers x 360s, max_tokens=512, model=Qwen/Qwen3-1.7B
+load stopped; waiting up to 420s for scale-down (cooldown + stabilisation)
+02:55:35  cooldown replicas 2/2 ready   waiting 231    running 45
+02:55:49  cooldown replicas 2/2 ready   waiting 155    running 34
+02:56:06  cooldown replicas 2/2 ready   waiting 71     running 34
+02:56:21  cooldown replicas 2/2 ready   waiting 0      running 0
+02:56:38  cooldown replicas 2/2 ready   waiting 0      running 0
+02:56:53  cooldown replicas 2/2 ready   waiting 0      running 0
+02:57:09  cooldown replicas 2/2 ready   waiting 0      running 0
+02:57:24  cooldown replicas 2/2 ready   waiting 0      running 0
+02:57:41  cooldown replicas 2/2 ready   waiting 0      running 0
+02:57:56  cooldown replicas 2/2 ready   waiting 0      running 0
+02:58:11  cooldown replicas 1/1 ready   waiting 0      running 0
+back to 1 replica

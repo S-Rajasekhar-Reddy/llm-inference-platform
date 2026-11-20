@@ -23,3 +23,21 @@ make scale-test     # 6 min of load, then watch it scale back (about 10 min in a
 `scale-test` runs the load as an in-cluster Job against the Service, so both replicas get
 traffic (a port-forward would pin everything to one pod), and prints replicas, waiting and running
 requests every 10 s. Keep `make grafana` open on the "vLLM inference platform" dashboard for the graph.
+
+## Result (17 Nov 2026)
+
+Raw output: [`bench/results/autoscaling/20261117T0248Z-scale-test.log`](../../bench/results/autoscaling/20261117T0248Z-scale-test.log).
+
+| Step | Time (UTC) | After |
+|---|---|---|
+| Load starts (512 concurrent) | 02:48:51 | |
+| KEDA asks for 2 replicas | 02:49:03 | 12 s |
+| Second pod Ready | 02:51:37 | about 2.5 min |
+| Queue empty | 02:56:21 | |
+| Back to 1 replica | 02:58:11 | about 2 min (HPA stabilisation window) |
+
+![Grafana during the scale test: queue depth, time to first token, GPU at 100%, ready pods 1 -> 2 -> 1](../../docs/img/2026-11-17-keda-scale-test-grafana.png)
+
+The second replica did not raise throughput: the shared GPU was already at 100% and each pod's
+1.5 GiB KV cache filled (preemptions on the dashboard). On one GPU this proves the scaling loop,
+not capacity; capacity needs a second GPU node (the EKS run with Karpenter).

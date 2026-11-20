@@ -5,15 +5,10 @@ hfOffline: true           # weights are already cached locally
 cache:
   type: hostPath
 
-# Two replicas share the 16 GB GPU (device plugin time-slicing = 2). Each pod gets
-# 0.4 x 16 GB at startup and a pinned 1.5 GiB KV cache (~14k tokens for Qwen3-1.7B),
-# about 6 GiB in total, so both fit next to the ~1.5 GB Windows uses.
-model:
-  gpuMemoryUtilization: 0.4
-  kvCacheMemoryBytes: 1610612736
-
-autoscaling:
-  enabled: true
+# Default: one replica with the whole GPU (chart defaults: gpuMemoryUtilization 0.85,
+# KV cache sized by vLLM). bench/results/replicas/ shows why: on one GPU, one instance
+# with a big KV cache beat two small replicas at every load. The 2-replica KEDA demo is
+# an overlay: values-local-keda.yaml (`make up-local KEDA=1`).
 
 monitoring:
   serviceMonitor:

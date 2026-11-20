@@ -5,8 +5,9 @@
 #   make down-local    remove the vLLM release (keeps k3s, the device plugin and the caches)
 #   make monitoring-up kube-prometheus-stack + GPU exporter (run once, before up-local)
 #   make grafana       port-forward Grafana with the vLLM dashboard
-#   make keda-up       KEDA, so vLLM scales 1 -> 2 replicas on queue depth (run once, before up-local)
-#   make scale-test    push past the queue threshold and watch it scale out and back
+#   make keda-up       KEDA, for the autoscaling demo (run once)
+#   make up-local KEDA=1  demo mode: 2 small replicas on one time-sliced GPU, scaled on queue depth
+#   make scale-test    (demo mode) push past the queue threshold and watch it scale out and back
 #   make help          list every target
 #
 # One-time prerequisites: WSL2 with systemd, Docker Engine, NVIDIA Container Toolkit, Helm,
@@ -35,6 +36,8 @@ MON_NS      ?= monitoring
 KPS_VERSION ?= 93.3.0     # kube-prometheus-stack chart
 GPU_EXPORTER_VERSION ?= 2.19.0   # nvidia-gpu-exporter chart (app v1.19.0)
 ALERT       ?=
+# KEDA=1 adds the autoscaling demo overlay (values-local-keda.yaml)
+KEDA        ?= 0
 KEDA_VERSION ?= 2.21.1    # kedacore/keda chart
 TF_DIR      := infra/terraform
 
@@ -45,7 +48,7 @@ NO_MONITORING   := --set monitoring.serviceMonitor.enabled=false --set monitorin
 MONITORING_APIS := --api-versions monitoring.coreos.com/v1/ServiceMonitor --api-versions monitoring.coreos.com/v1/PrometheusRule \
 	--api-versions keda.sh/v1alpha1/ScaledObject
 
-HELM_LOCAL_ARGS := -f $(CHART)/values-local.yaml \
+HELM_LOCAL_ARGS := -f $(CHART)/values-local.yaml $(if $(filter 1,$(KEDA)),-f $(CHART)/values-local-keda.yaml) \
 	--set cache.hostPath.huggingface=$(HF_CACHE) \
 	--set cache.hostPath.vllm=$(VLLM_CACHE) \
 	$(if $(strip $(MODEL)),--set model.name=$(strip $(MODEL))) $(HELM_EXTRA)
@@ -65,7 +68,7 @@ preflight: ## Check tools, node, nvidia runtime, caches, and leftovers from the 
 	kubectl wait --for=condition=Ready node --all --timeout=60s >/dev/null
 	kubectl get runtimeclass nvidia >/dev/null 2>&1 || { echo "no 'nvidia' RuntimeClass: is the NVIDIA Container Toolkit installed? then: sudo systemctl restart k3s"; exit 1; }
 	kubectl get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1 || { echo "Prometheus Operator CRDs missing: run 'make monitoring-up' first"; exit 1; }
-	kubectl get crd scaledobjects.keda.sh >/dev/null 2>&1 || { echo "KEDA CRDs missing: run 'make keda-up' first"; exit 1; }
+	[ "$(KEDA)" != 1 ] || kubectl get crd scaledobjects.keda.sh >/dev/null 2>&1 || { echo "KEDA CRDs missing: run 'make keda-up' first"; exit 1; }
 	test -d "$(HF_CACHE)" || { echo "HF cache not found at $(HF_CACHE)"; exit 1; }
 	model="$(strip $(MODEL))"; model="$${model:-$$(awk '/^  name:/{print $$2; exit}' $(CHART)/values.yaml)}"
 	test -d "$(HF_CACHE)/hub/models--$${model//\//--}" || { echo "$$model is not in $(HF_CACHE); the chart runs offline. Download it once first."; exit 1; }
@@ -132,6 +135,7 @@ gpu-smoke: ## Run nvidia-smi in a pod under the nvidia RuntimeClass, then clean 
 lint: ## helm lint + render the local values (no cluster needed)
 	@helm lint $(CHART) $(HELM_LOCAL_ARGS) $(NO_MONITORING)
 	helm template $(RELEASE) $(CHART) $(HELM_LOCAL_ARGS) $(MONITORING_APIS) >/dev/null && echo "template renders"
+	helm template $(RELEASE) $(CHART) $(HELM_LOCAL_ARGS) -f $(CHART)/values-local-keda.yaml $(MONITORING_APIS) >/dev/null && echo "template renders (KEDA demo)"
 	bash -n platform/monitoring/alert-test.sh && bash -n platform/monitoring/prom-api.sh && bash -n platform/autoscaling/scale-test.sh && bash -n bench/replicas-same-gpu.sh && python3 -m py_compile platform/monitoring/loadgen.py platform/monitoring/promq.py && echo "scripts parse"
 
 monitoring-up: ## Install kube-prometheus-stack + nvidia_gpu_exporter into the monitoring namespace
@@ -172,7 +176,7 @@ keda-up: ## Install KEDA (namespace keda); the chart's ScaledObject needs its CR
 keda-down: ## Remove KEDA (delete the vLLM release's ScaledObject first: make up-local HELM_EXTRA='--set autoscaling.enabled=false')
 	@helm uninstall keda -n keda || true
 
-scale-test: ## Load past the queue threshold and watch KEDA scale 1 -> 2 -> 1 (about 10 min)
+scale-test: ## (after make up-local KEDA=1) Load past the queue threshold; watch 1 -> 2 -> 1 (about 10 min)
 	@RELEASE=$(RELEASE) NAMESPACE=$(NAMESPACE) MON_NS=$(MON_NS) VLLM_IMAGE=$(VLLM_IMAGE) \
 	  platform/autoscaling/scale-test.sh
 

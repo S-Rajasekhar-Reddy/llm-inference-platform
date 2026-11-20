@@ -15,7 +15,7 @@ Needs Terraform >= 1.6 and AWS credentials for the target account (`AWS_PROFILE=
 
 | File | Resources | Notes |
 |---|---|---|
-| [`main.tf`](main.tf) | VPC (3 AZs, one NAT gateway), EKS with a 2-node `t3.large` Bottlerocket system group, Karpenter IAM + interruption queue + controller | GPU nodes are not in Terraform: Karpenter launches them from [`platform/eks/karpenter-gpu.yaml`](../../platform/eks/karpenter-gpu.yaml) (g6.xlarge, on-demand, max 8 vCPU = the G/VT quota, removed 5 min after going idle). |
+| [`main.tf`](main.tf) | VPC (3 AZs, one NAT gateway), EKS with a 2-node `t3.large` Bottlerocket system group, Karpenter IAM + interruption queue + controller | GPU nodes are not in Terraform: Karpenter launches them from [`platform/eks/karpenter-gpu.yaml`](../../platform/eks/karpenter-gpu.yaml) (g6.xlarge, on-demand, max 4 vCPU = one node, the G/VT quota requested; removed 5 min after going idle). |
 | [`s3.tf`](s3.tf) | Weights bucket (private, encrypted) and a read policy for GPU nodes | Decision D9: weights come from S3, not Hugging Face, so cold start measures loading. |
 | [`budget.tf`](budget.tf) | Monthly budget with email alerts at 5, 10 and 20 USD actual, plus a forecast alert | Created with everything else, so it exists before the first GPU node. |
 | [`providers.tf`](providers.tf) | `default_tags`: `owner`, `project`, `managed-by` | Karpenter-launched instances get the same tags from the EC2NodeClass. |

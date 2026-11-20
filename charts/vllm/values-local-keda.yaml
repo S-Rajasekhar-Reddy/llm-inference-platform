@@ -1,0 +1,12 @@
+# Overlay on values-local.yaml for the queue-depth autoscaling demo: `make up-local KEDA=1`.
+# Two replicas share the 16 GB GPU (device plugin time-slicing = 2). Each pod gets
+# 0.4 x 16 GB at startup and a pinned 1.5 GiB KV cache (~14k tokens for Qwen3-1.7B),
+# about 6 GiB in total, so both fit next to the ~1.5 GB Windows uses.
+# This shows the scaling loop working; it does not add capacity on one GPU
+# (bench/results/replicas/: two replicas gave 48% less throughput at 64 concurrent).
+model:
+  gpuMemoryUtilization: 0.4
+  kvCacheMemoryBytes: 1610612736
+
+autoscaling:
+  enabled: true

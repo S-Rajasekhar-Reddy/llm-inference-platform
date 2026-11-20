@@ -41,12 +41,12 @@ Prerequisites: WSL2 (Ubuntu 24.04) with systemd, or Linux; Docker Engine; the NV
 ```bash
 make k3s-install     # one time; then: export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 make monitoring-up   # one time: kube-prometheus-stack + GPU exporter
-make keda-up         # one time: KEDA for queue-depth autoscaling
+make keda-up         # one time: KEDA, for the autoscaling demo
 make up-local        # device plugin, image import, helm upgrade --install charts/vllm, wait for Ready
 make smoke-local     # port-forward + one completion
 make grafana         # dashboard at http://localhost:3000
 make alert-test ALERT=ttft   # force an alert to fire (ttft | queue | idle), then restore
-make scale-test      # load past the queue threshold; watch 1 -> 2 -> 1 replicas
+make up-local KEDA=1 && make scale-test   # demo: 2 replicas on one GPU, watch 1 -> 2 -> 1
 make down-local      # remove the release (k3s and the caches stay)
 make help            # every target
 ```

@@ -52,7 +52,7 @@ spec:
           effect: NoSchedule
       expireAfter: 24h
   limits:
-    cpu: 8                           # = the 8 vCPU G/VT quota: at most 2x g6.xlarge
+    cpu: 4                           # = the 4 vCPU G/VT quota requested: one g6.xlarge
   disruption:
     consolidationPolicy: WhenEmpty
     consolidateAfter: 5m             # an idle GPU node is gone 5 min after its last pod

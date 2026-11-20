@@ -110,8 +110,9 @@ run_config() { # $1 name, $2 replicas, rest = --set args
   done
 }
 
-run_config 1x-small 1
-run_config 2x-small 2
+SMALL=(--set model.gpuMemoryUtilization=0.4 --set model.kvCacheMemoryBytes=1610612736)
+run_config 1x-small 1 "${SMALL[@]}"
+run_config 2x-small 2 "${SMALL[@]}"
 run_config 1x-full  1 --set model.gpuMemoryUtilization=0.85 --set model.kvCacheMemoryBytes=
 
 {

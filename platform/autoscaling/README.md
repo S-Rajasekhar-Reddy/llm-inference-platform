@@ -7,16 +7,19 @@ test the queue is what tracked user pain: p95 time to first token went from abou
 ```bash
 make keda-up        # KEDA 2.21.1, namespace "keda" (once)
 make device-plugin  # time-slicing: the node advertises nvidia.com/gpu: 2 (also part of up-local)
-make up-local       # adds the ScaledObject; vLLM restarts once with the 2-replica memory budget
+make up-local KEDA=1  # demo overlay: ScaledObject + 2-replica memory budget (vLLM restarts once)
 make scale-test     # 6 min of load, then watch it scale back (about 10 min in all)
 ```
+
+This is a demo of the scaling loop, not the default: plain `make up-local` runs one replica with the
+whole GPU, which measured better at every load ([`bench/results/replicas/`](../../bench/results/replicas/)).
 
 ## How it fits on one 16 GB GPU
 
 | Piece | Setting | Why |
 |---|---|---|
 | Device plugin | time-slicing, `replicas: 2` ([`10-nvidia-device-plugin.yaml`](../k3s/10-nvidia-device-plugin.yaml)) | Two pods can each request `nvidia.com/gpu: 1`. No memory isolation: each pod has to stay inside its own budget. |
-| vLLM memory | `--gpu-memory-utilization 0.4`, `--kv-cache-memory` 1.5 GiB ([`values-local.yaml`](../../charts/vllm/values-local.yaml)) | vLLM v0.33.0 refuses to start unless `utilization x total` is free, even with a pinned KV cache. 0.4 leaves room for the second pod next to Windows' ~1.5 GB. |
+| vLLM memory | `--gpu-memory-utilization 0.4`, `--kv-cache-memory` 1.5 GiB ([`values-local-keda.yaml`](../../charts/vllm/values-local-keda.yaml)) | vLLM v0.33.0 refuses to start unless `utilization x total` is free, even with a pinned KV cache. 0.4 leaves room for the second pod next to Windows' ~1.5 GB. |
 | ScaledObject | `sum(vllm:num_requests_waiting)`, threshold 5 per replica, 1-2 replicas ([`scaledobject.yaml`](../../charts/vllm/templates/scaledobject.yaml)) | Scale up immediately; scale down once the queue has stayed low for the 120 s HPA stabilisation window. |
 | Alert | `VLLMOutOfCapacity` follows the same threshold and max | Fires only when KEDA has nothing left to add. |
 

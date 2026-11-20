@@ -22,7 +22,7 @@ line() {
     "$(q "sum(vllm:num_requests_waiting{$sel})")" "$(q "sum(vllm:num_requests_running{$sel})")"
 }
 
-kubectl get scaledobject -n "$NAMESPACE" "$RELEASE" >/dev/null || { echo "no ScaledObject $RELEASE: make keda-up && make up-local"; exit 1; }
+kubectl get scaledobject -n "$NAMESPACE" "$RELEASE" >/dev/null || { echo "no ScaledObject $RELEASE: make keda-up, then make up-local KEDA=1"; exit 1; }
 echo "allocatable nvidia.com/gpu: $(kubectl get nodes -o jsonpath='{.items[0].status.allocatable.nvidia\.com/gpu}') (needs 2)"
 
 # Load runs inside the cluster against the Service, so both replicas get traffic

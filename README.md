@@ -140,7 +140,9 @@ Built so far: `Makefile`, `charts/vllm/`, `platform/k3s/`, `platform/monitoring/
 
 ```
 ├── Makefile                 # built: up-local, down-local, smoke-local, lint, monitoring-up, grafana, alert-test; planned: up-cloud, down-cloud, bench
-├── infra/terraform/         # built (plan only): VPC, EKS, Karpenter, S3 weights bucket, $20 budget alerts
+├── infra/terraform/         # built (plan only): VPC, EKS, Karpenter, S3 gateway endpoint
+├── infra/billing/           # built (plan only): $20 project budget (by tag) + S3 weights bucket, kept after the run
+├── infra/scripts/           # built: cloud-preflight, cloud-cost (live estimate), cloud-leftovers
 ├── platform/eks/            # built: Karpenter GPU NodePool (g6.xlarge, on-demand)
 ├── charts/vllm/             # built: Helm chart, values-local.yaml, ServiceMonitor, alerts, dashboard JSON; planned: values-cloud.yaml
 ├── platform/k3s/            # built: GPU smoke test, NVIDIA device plugin
@@ -152,7 +154,7 @@ Built so far: `Makefile`, `charts/vllm/`, `platform/k3s/`, `platform/monitoring/
 
 ## Progress log
 
-- **2026-11-17:** KEDA scales vLLM on `sum(vllm:num_requests_waiting)` (5 per replica, 1–2 replicas); the NVIDIA device plugin time-slices the GPU into 2, and each pod gets 0.4 of the GPU plus a pinned 1.5 GiB KV cache. `make scale-test` (512 concurrent, in-cluster): KEDA asked for 2 replicas 12 s after load started, the second pod was Ready about 2.5 min later, and it scaled back to 1 about 2 min after the queue emptied. Finding: on one shared GPU the second replica did not raise throughput (the GPU was already at 100% and each KV cache filled), so it proves the scaling loop, not extra capacity; that comes from a second GPU node in the cloud run. Terraform for VPC, EKS, Karpenter, S3 and budget alerts passes `terraform plan` (not applied).
+- **2026-11-17:** KEDA scales vLLM on `sum(vllm:num_requests_waiting)` (5 per replica, 1–2 replicas); the NVIDIA device plugin time-slices the GPU into 2, and each pod gets 0.4 of the GPU plus a pinned 1.5 GiB KV cache. `make scale-test` (512 concurrent, in-cluster): KEDA asked for 2 replicas 12 s after load started, the second pod was Ready about 2.5 min later, and it scaled back to 1 about 2 min after the queue emptied. Finding: on one shared GPU the second replica did not raise throughput (the GPU was already at 100% and each KV cache filled), so it proves the scaling loop, not extra capacity; that needs a second GPU (the cloud run's 4 vCPU G/VT quota allows one GPU node, so it shows Karpenter adding a GPU node from zero and removing it, not a second node). Terraform for VPC, EKS, Karpenter, S3 and budget alerts passes `terraform plan` (not applied).
 - **2026-11-16 (pm):** Monitoring: `make monitoring-up` installs kube-prometheus-stack and nvidia_gpu_exporter; the vLLM chart adds a ServiceMonitor, three alerts and a Grafana dashboard. `make alert-test` forced each alert to fire (TTFT SLO, out of capacity at max replicas, idle GPU). WSL2 fixes: node-exporter's root mount propagation, and Prometheus queries through a short port-forward.
 - **2026-11-16:** Helm chart `charts/vllm` replaces the plain manifests; `make up-local` runs preflight checks, deploys the NVIDIA device plugin, imports the pinned image from Docker into k3s and installs the release. Cache paths come from `$HOME` instead of being hard-coded; `enableServiceLinks: false` is built into the chart.
 - **2026-11-12:** Plan compressed after week 1 ran ahead: the platform now ships Fri 27 Nov (was 11 Dec); the cloud run moves to week 3.

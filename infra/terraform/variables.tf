@@ -22,7 +22,7 @@ variable "project" {
 }
 
 variable "kubernetes_version" {
-  description = "EKS Kubernetes version. Check `aws eks describe-cluster-versions` before apply."
+  description = "EKS Kubernetes version. `make cloud-preflight` fails if it is in extended support (control plane $0.60/hr instead of $0.10)."
   type        = string
   default     = "1.34"
 }
@@ -42,15 +42,4 @@ variable "karpenter_version" {
   description = "Karpenter Helm chart version (OCI, public.ecr.aws/karpenter)."
   type        = string
   default     = "1.15.2"
-}
-
-variable "budget_limit_usd" {
-  description = "Monthly cost budget for the account. Alerts fire at 25%, 50% and 100% (5, 10 and 20 USD at the default)."
-  type        = number
-  default     = 20
-}
-
-variable "budget_alert_emails" {
-  description = "Email addresses that receive the budget alerts."
-  type        = list(string)
 }

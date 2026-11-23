@@ -1,5 +1,7 @@
 # Model weights for the cloud run (design decision D9): synced to the GPU node's disk
-# so cold start measures loading, not a Hugging Face download.
+# so cold start measures loading, not a Hugging Face download. In this stack so the weights
+# can be uploaded before the run, and so a tagged resource shows up in billing early enough
+# to activate the project cost allocation tag.
 resource "aws_s3_bucket" "weights" {
   bucket        = "${var.name}-weights-${data.aws_caller_identity.current.account_id}"
   force_destroy = true # the bucket only holds re-downloadable public weights

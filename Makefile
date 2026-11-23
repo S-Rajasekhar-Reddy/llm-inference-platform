@@ -40,6 +40,7 @@ ALERT       ?=
 KEDA        ?= 0
 KEDA_VERSION ?= 2.21.1    # kedacore/keda chart
 TF_DIR      := infra/terraform
+BILLING_DIR := infra/billing
 
 # helm lint can't fake the Prometheus Operator APIs, so it checks the chart without them;
 # helm template gets them via --api-versions.
@@ -54,7 +55,8 @@ HELM_LOCAL_ARGS := -f $(CHART)/values-local.yaml $(if $(filter 1,$(KEDA)),-f $(C
 	$(if $(strip $(MODEL)),--set model.name=$(strip $(MODEL))) $(HELM_EXTRA)
 
 .PHONY: help k3s-install preflight device-plugin image-import up-local down-local smoke-local status gpu-smoke lint \
-	monitoring-up monitoring-down monitoring-status grafana alert-test keda-up keda-down scale-test tf-init tf-plan bench-replicas
+	monitoring-up monitoring-down monitoring-status grafana alert-test keda-up keda-down scale-test tf-init tf-plan bench-replicas \
+	billing-plan cloud-preflight cloud-cost cloud-leftovers
 
 help: ## List targets
 	@grep -hE '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -194,3 +196,22 @@ tf-plan: ## terraform plan for the EKS cloud run (read-only; needs AWS credentia
 	@test -f $(TF_DIR)/terraform.tfvars || { echo "copy $(TF_DIR)/terraform.tfvars.example to terraform.tfvars and fill it in"; exit 1; }
 	terraform -chdir=$(TF_DIR) plan -out=tfplan
 	terraform -chdir=$(TF_DIR) show -no-color tfplan | grep -E '^Plan:'
+
+billing-plan: ## terraform init + plan for infra/billing (project budget + weights bucket; applied before the run, kept after it)
+	@command -v terraform >/dev/null || { echo "missing: terraform (>= 1.6)"; exit 1; }
+	@test -f $(BILLING_DIR)/terraform.tfvars || { echo "copy $(BILLING_DIR)/terraform.tfvars.example to terraform.tfvars and fill it in"; exit 1; }
+	terraform -chdir=$(BILLING_DIR) init -upgrade
+	terraform -chdir=$(BILLING_DIR) fmt -check -diff
+	terraform -chdir=$(BILLING_DIR) validate
+	terraform -chdir=$(BILLING_DIR) plan -out=tfplan
+	terraform -chdir=$(BILLING_DIR) show -no-color tfplan | grep -E '^Plan:'
+	@echo "Apply (creates the budget and an empty bucket): terraform -chdir=$(BILLING_DIR) apply tfplan"
+
+cloud-preflight: ## Read-only checks before the cloud run: quota vs NodePool limit, GPU AZs, EKS version support, budget, cost tag, leftovers
+	@python3 infra/scripts/cloud_preflight.py
+
+cloud-cost: ## Live cost estimate of the running cloud run (runtime x price); billing data lags by hours
+	@python3 infra/scripts/cloud_cost.py
+
+cloud-leftovers: ## After terraform destroy: anything from the run that still exists and bills (exit 1 if so)
+	@python3 infra/scripts/cloud_leftovers.py

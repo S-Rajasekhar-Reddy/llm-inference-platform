@@ -17,6 +17,10 @@ locals {
   # Three AZs: g6 capacity is not in every us-east-1 zone, so Karpenter gets a choice.
   azs = slice(data.aws_availability_zones.available.names, 0, 3)
 
+  # Created by infra/billing (applied first, kept after this stack is destroyed). Built from the
+  # name, not looked up, so `terraform plan` works before infra/billing is applied.
+  weights_read_policy_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${var.name}-weights-read"
+
   tags = {
     owner      = var.owner
     project    = var.project
@@ -52,6 +56,17 @@ module "vpc" {
     "kubernetes.io/role/internal-elb" = 1
     "karpenter.sh/discovery"          = var.name
   }
+
+  tags = local.tags
+}
+
+# Free gateway endpoint: weights come from S3 without passing through the NAT gateway,
+# which charges per GB processed.
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = module.vpc.vpc_id
+  service_name      = "com.amazonaws.${var.region}.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = module.vpc.private_route_table_ids
 }
 
 ################################################################################
@@ -103,6 +118,10 @@ module "eks" {
   node_security_group_tags = {
     "karpenter.sh/discovery" = var.name
   }
+
+  # Also passed explicitly (not only via default_tags) so the system nodes' launch template
+  # tags the instances and volumes it starts; the project budget counts costs by this tag.
+  tags = local.tags
 }
 
 ################################################################################
@@ -123,8 +142,10 @@ module "karpenter" {
   # WeightsRead: GPU nodes pull model weights from the bucket in s3.tf
   node_iam_role_additional_policies = {
     AmazonSSMManagedInstanceCore = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-    WeightsRead                  = aws_iam_policy.weights_read.arn
+    WeightsRead                  = local.weights_read_policy_arn
   }
+
+  tags = local.tags
 }
 
 resource "helm_release" "karpenter" {

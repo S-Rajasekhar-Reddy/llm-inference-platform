@@ -1,0 +1,27 @@
+{
+  "date_utc": "20261123T0522Z",
+  "model": "Qwen/Qwen3-8B-FP8",
+  "image": "vllm/vllm-openai:v0.33.0",
+  "node": "stlegion",
+  "instance_type": "k3s",
+  "gpu": "NVIDIA GeForce RTX 5080 Laptop GPU, 16303 MiB, 621.14",
+  "server_args": [
+    "--model",
+    "Qwen/Qwen3-8B-FP8",
+    "--max-model-len",
+    "8192",
+    "--gpu-memory-utilization",
+    "0.85"
+  ],
+  "concurrency_levels": [
+    "8",
+    "32",
+    "64"
+  ],
+  "repeats": 3,
+  "input_len": 512,
+  "output_len": 128,
+  "warmup_prompts": 50,
+  "cost_per_hour_usd": null,
+  "client": "vllm bench serve, in-cluster Job on the server's node"
+}

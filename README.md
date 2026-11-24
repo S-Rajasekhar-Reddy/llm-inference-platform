@@ -133,6 +133,8 @@ What the numbers say:
 
 ![Grafana: vLLM dashboard on EKS during the L4 benchmark](docs/img/2026-11-24-eks-l4-bench-grafana.png)
 
+*The three load steps (8, 32, 64 concurrent), 10:55–11:26 IST. KV-cache use peaked around 60%, so the 24 GB L4 was not short of cache. The GPU panels are empty on purpose: the GPU exporter is not deployed on EKS, where the single GPU is not time-sliced and the exporter would compete for it.*
+
 The image pull is half the cloud cold start; it is the next thing to cut. Guardrails used: a project budget that
 counts only tagged costs and survives `destroy`, an account-wide backstop, a live cost estimate, and a leftovers
 check ([runbook](docs/cloud-run.md)).

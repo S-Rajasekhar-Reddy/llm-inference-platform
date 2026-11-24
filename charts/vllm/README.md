@@ -1,7 +1,7 @@
 # vllm Helm chart
 
 vLLM's OpenAI-compatible server, one GPU per pod. The same chart runs on the local k3s cluster
-(`values-local.yaml`) and on EKS in week 3 (`values-cloud.yaml`, not written yet).
+(`values-local.yaml`, `make up-local`) and on EKS (`values-cloud.yaml`, `make up-cloud`; run once on 24 Nov with an L4).
 
 ```bash
 make up-local                    # the normal way: preflight, device plugin, image import, then this chart
@@ -16,12 +16,15 @@ helm template vllm charts/vllm -f charts/vllm/values-local.yaml \
 |---|---|---|
 | `image.tag` | `v0.33.0` | Pinned vLLM release; bump deliberately. The Makefile reads it from here. |
 | `model.name` | `Qwen/Qwen3-1.7B` | Fast iteration model. `make up-local MODEL=Qwen/Qwen3-8B-FP8` for the main one. |
+| `model.servedModelName` | empty (cloud: `Qwen/Qwen3-8B-FP8`) | Name the API serves. Set when `model.name` is a local path, so clients and `bench/run.sh` see the same id on every platform. |
 | `model.maxModelLen` | `8192` | Context length; the KV-cache budget is sized against it. |
 | `model.gpuMemoryUtilization` | `0.85` (KEDA demo: `0.4`) | Share of the GPU vLLM may use. Always passed: vLLM checks this much is free at startup even when the KV cache is pinned, so two pods on one GPU each need a share that fits beside the other. |
 | `model.kvCacheMemoryBytes` | empty (KEDA demo: 1.5 GiB) | Pins the KV cache in bytes so capacity does not change between cold and warm boots ([vllm#54383](https://github.com/vllm-project/vllm/issues/54383)) and both replicas get the same budget (~14k tokens for Qwen3-1.7B). |
 | `extraArgs` | `[]` | Any other vLLM flags, e.g. `["--kv-cache-dtype", "fp8"]`. |
 | `hfOffline` | `false` (local: `true`) | `HF_HUB_OFFLINE=1`: skip Hugging Face network checks once weights are cached. |
-| `runtimeClassName` | empty (local: `nvidia`) | k3s keeps runc as the default runtime, so GPU pods name the nvidia one. |
+| `runtimeClassName` | empty (local: `nvidia`) | k3s keeps runc as the default runtime, so GPU pods name the nvidia one. Bottlerocket's NVIDIA variant on EKS makes it the default, so the cloud values leave it empty. |
+| `weights.s3.enabled` / `.uri` / `.path` | `false` (cloud: `true`) | An init container copies the weights from S3 to the node's disk before vLLM starts (8.9 GB in ~60 s on g6.xlarge), so cold start measures loading, not a Hugging Face download. `make up-cloud` sets the URI from Terraform. |
+| `serviceAccount.create` / `.name` | `false` (cloud: `true` / `vllm`) | The EKS Pod Identity association grants the weights bucket to this service account only, not to the node role. |
 | `gpu.request` / `gpu.count` | `true` / `1` | Requests `nvidia.com/gpu` from the device plugin. |
 | `strategy.type` | `Recreate` | With one GPU a rolling update would start a second pod that cannot fit. |
 | `cache.type` | `emptyDir` (local: `hostPath`) | hostPath keeps weights and the torch.compile cache across restarts (cold start ~35 min to ~2.3 min). |

@@ -8,7 +8,7 @@ output "region" {
 
 output "configure_kubectl" {
   description = "Run this after apply to point kubectl at the cluster."
-  value       = "aws eks update-kubeconfig --region ${var.region} --name ${module.eks.cluster_name}"
+  value       = "make cloud-kubeconfig  (writes ~/.kube/llm-inference-eks; the k3s kubeconfig is untouched)"
 }
 
 output "karpenter_node_role" {

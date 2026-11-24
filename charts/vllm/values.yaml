@@ -8,7 +8,10 @@ image:
   pullPolicy: IfNotPresent
 
 model:
-  name: Qwen/Qwen3-1.7B
+  name: Qwen/Qwen3-1.7B   # Hugging Face id, or a local path (values-cloud.yaml: /models/...)
+  # Name clients use in requests. Empty = model.name. Set it when name is a path, so the
+  # API (and the benchmark) still see the Hugging Face id.
+  servedModelName: ""
   maxModelLen: 8192
   # Always passed. vLLM checks at startup that this share of total GPU memory is
   # free, even when kvCacheMemoryBytes pins the KV cache, so two pods sharing a GPU
@@ -43,6 +46,22 @@ gpu:
   count: 1
 
 resources: {}             # CPU/memory requests and limits, merged with the GPU limit
+
+# Copy the weights from S3 to the node's disk before vLLM starts (design decision D9), so
+# cold start measures loading, not a Hugging Face download. Credentials come from the
+# service account (EKS Pod Identity), not the node role.
+weights:
+  s3:
+    enabled: false
+    uri: ""                 # s3://bucket/models/<model>/ (make up-cloud sets it from Terraform)
+    path: /models/model     # where the files land; point model.name here
+    sizeLimit: 30Gi
+    region: us-east-1
+    image: public.ecr.aws/aws-cli/aws-cli:2.22.0
+
+serviceAccount:
+  create: false
+  name: ""                  # empty = default service account (create=false) or the release name
 
 service:
   type: ClusterIP

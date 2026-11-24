@@ -139,10 +139,9 @@ module "karpenter" {
   node_iam_role_name              = "${var.name}-karpenter-node"
   create_pod_identity_association = true
 
-  # WeightsRead: GPU nodes pull model weights from the bucket in s3.tf
+  # The weights bucket is read by the vLLM pod via Pod Identity (pod-identity.tf), not the node role.
   node_iam_role_additional_policies = {
     AmazonSSMManagedInstanceCore = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-    WeightsRead                  = local.weights_read_policy_arn
   }
 
   tags = local.tags

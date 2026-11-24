@@ -47,3 +47,13 @@ variable "budget_alert_emails" {
   description = "Email addresses that receive the budget alerts."
   type        = list(string)
 }
+
+variable "account_backstop_usd" {
+  description = <<-EOT
+    Optional second budget on the WHOLE account, independent of tags: set it to the account's normal
+    monthly spend + the project budget. Catches a run left up while the project tag is not yet active
+    (the tag budget would read $0). null = not created.
+  EOT
+  type        = number
+  default     = null
+}

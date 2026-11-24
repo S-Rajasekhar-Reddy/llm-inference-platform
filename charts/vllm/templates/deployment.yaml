@@ -1,6 +1,9 @@
 {{- if and (eq .Values.cache.type "hostPath") (or (not .Values.cache.hostPath.huggingface) (not .Values.cache.hostPath.vllm)) }}
 {{- fail "cache.type=hostPath needs cache.hostPath.huggingface and cache.hostPath.vllm (make up-local sets them from $HOME)" }}
 {{- end }}
+{{- if and .Values.weights.s3.enabled (not .Values.weights.s3.uri) }}
+{{- fail "weights.s3.enabled needs weights.s3.uri (make up-cloud sets it from Terraform)" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -35,6 +38,27 @@ spec:
       # name starts with "vllm" sets VLLM_PORT, which vLLM reads as its own setting and crashes
       # (found on k3s, 11 Nov). Nothing here uses those variables; Services resolve through DNS.
       enableServiceLinks: false
+      {{- if or .Values.serviceAccount.create .Values.serviceAccount.name }}
+      serviceAccountName: {{ include "vllm.serviceAccountName" . }}
+      {{- end }}
+      {{- if .Values.weights.s3.enabled }}
+      initContainers:
+        - name: weights
+          image: {{ .Values.weights.s3.image }}
+          env:
+            - name: AWS_DEFAULT_REGION
+              value: {{ .Values.weights.s3.region | quote }}
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              start=$(date +%s)
+              aws s3 sync {{ .Values.weights.s3.uri | quote }} {{ .Values.weights.s3.path | quote }} --only-show-errors
+              echo "weights: $(du -sh {{ .Values.weights.s3.path | quote }} | cut -f1) in $(( $(date +%s) - start ))s"
+          volumeMounts:
+            - name: models
+              mountPath: {{ dir .Values.weights.s3.path }}
+      {{- end }}
       containers:
         - name: vllm
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -42,6 +66,10 @@ spec:
           args:
             - --model
             - {{ .Values.model.name | quote }}
+            {{- with .Values.model.servedModelName }}
+            - --served-model-name
+            - {{ . | quote }}
+            {{- end }}
             - --max-model-len
             - {{ .Values.model.maxModelLen | quote }}
             - --gpu-memory-utilization
@@ -99,6 +127,11 @@ spec:
               mountPath: /root/.cache/vllm
             - name: dshm
               mountPath: /dev/shm
+            {{- if .Values.weights.s3.enabled }}
+            - name: models
+              mountPath: {{ dir .Values.weights.s3.path }}
+              readOnly: true
+            {{- end }}
       volumes:
         {{- if eq .Values.cache.type "hostPath" }}
         - name: hf-cache
@@ -119,6 +152,11 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: {{ .Values.shm.sizeLimit }}
+        {{- if .Values.weights.s3.enabled }}
+        - name: models
+          emptyDir:
+            sizeLimit: {{ .Values.weights.s3.sizeLimit }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

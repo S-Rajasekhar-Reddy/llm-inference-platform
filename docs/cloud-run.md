@@ -50,6 +50,10 @@ The account is shared, so the account total is the wrong number. Two views:
      usage types containing `g6.xlarge`, `AmazonEKS` and `NatGateway`. That isolates the run only if
      nothing else in the account uses EKS, NAT gateways or g6 in us-east-1; check last month first.
 
+Until the tag is active the project budget reads $0, so there is also an optional **account-wide
+backstop** (`account_backstop_usd` in infra/billing): the account's normal monthly spend + $20,
+alerting at 80% and 100%. It needs no tag, so it covers a run left up before tag activation.
+
 The budget lives in its own Terraform state (`infra/billing`), so `terraform destroy` of the cluster
 does not delete it and late charges still alert. Alerts at $5, $10 and $20 actual, plus a forecast
 alert. Budgets are a **backstop, not a brake**: they are evaluated a few times a day on lagging data.
@@ -63,8 +67,8 @@ alert. Budgets are a **backstop, not a brake**: they are evaluated a few times a
 - [ ] Upload weights: the `upload_weights` command from `terraform -chdir=infra/billing output`.
 - [ ] Billing > Cost allocation tags: activate `project` as soon as it appears (or ask the payer admin).
 - [ ] `make tf-plan`: write down the `Plan: N to add` line.
-- [ ] Built and tested locally: `values-cloud.yaml`, `make up-cloud` / `make down-cloud`, and the
-      benchmark script (the same script the laptop numbers come from).
+- [ ] `make lint` renders the cloud values; `make tf-plan` includes the Pod Identity role and association.
+- [ ] Optional backstop budget set (`account_backstop_usd`), applied with `make billing-plan`.
 - [ ] Phone alarm for the hard stop.
 
 ## Run day (IST, 08:00–11:00 build block)
@@ -73,10 +77,15 @@ alert. Budgets are a **backstop, not a brake**: they are evaluated a few times a
 |---|---|---|---|
 | 08:00 | Preflight: `make cloud-preflight`, `make cloud-cost` (expect nothing running) | all OK | stop, no apply |
 | 08:05 | `terraform -chdir=infra/terraform apply` (~15–20 min) | apply complete | `terraform destroy`, stop |
-| 08:25 | **A. Cluster checks:** nodes Ready, Karpenter running, monitoring up, `make cloud-cost` lists the EKS cluster, both system nodes and the NAT (proves tags reach them) | all listed | fix tags or stop; cluster costs $0.33/h |
-| 08:40 | **B. GPU test run:** apply the NodePool, `make up-cloud`, smoke test. Record cold start (node launch, image pull, weights, model load). Then `make down-cloud` and **watch the GPU node disappear within ~6 min** | node gone, `make cloud-cost` burn rate back to ~$0.33/h | **teardown now**; the scale-to-zero path is the main cost safety |
-| 09:15 | **C. Benchmark:** `make up-cloud`, warm-up, 3 repeats, export Grafana snapshots and Prometheus queries, `make cloud-cost` | results files written | keep what you have |
+| 08:25 | **A. Cluster checks:** `make cloud-kubeconfig`, `make cloud-monitoring-up`; `make cloud-cost` lists the EKS cluster, both system nodes and the NAT (proves tags reach them) | all listed | fix tags or stop; cluster costs $0.33/h |
+| 08:40 | **B. GPU test run:** `make up-cloud` (applies the NodePool, deploys vLLM, prints the cold-start timeline: node launch, image pull, weights, model load), `make smoke-cloud`. Then `make down-cloud` and **watch the GPU node disappear within ~6 min** (`make status-cloud`) | node gone, `make cloud-cost` burn rate back to ~$0.33/h | **teardown now**; the scale-to-zero path is the main cost safety |
+| 09:15 | **C. Benchmark:** `make up-cloud` (second cold start), `make bench-cloud` (same script and levels as the laptop, plus cost per 1M output tokens), Grafana screenshots (`make grafana-cloud`), `make cloud-cost` | results files written | keep what you have |
 | 10:30 | **D. Teardown, whatever state C is in** (order matters, below) | `make cloud-leftovers` exits 0 | delete what it lists, run it again |
+
+**If kubectl suddenly gets refused or times out:** the home public IP probably changed and the EKS
+API only accepts `api_allowed_cidrs`. Put the new IP in `infra/terraform/terraform.tfvars` and run
+`terraform -chdir=infra/terraform apply` (an in-place change of the endpoint's allowed CIDRs, a few
+minutes). `make cloud-teardown` needs kubectl, so fix this before tearing down.
 
 **Hard stop:** teardown starts at 10:30 even mid-benchmark. Never leave the GPU node running
 unattended (no breaks with it up). Stuck for 30 min on any stage: tear down and retry another day.
@@ -86,12 +95,11 @@ unattended (no breaks with it up). Stuck for 30 min on any stage: tear down and 
 Terraform cannot see the GPU node (Karpenter launched it). Destroying the cluster first orphans the
 instance, which keeps billing, and the VPC delete then hangs on its network interface.
 
-1. `make down-cloud` (vLLM), then `kubectl delete nodepool gpu`.
-2. `kubectl get nodeclaims` until empty, and check the g6 instance is terminated:
-   `aws ec2 describe-instances --filters Name=tag:karpenter.sh/discovery,Values=llm-inference Name=instance-state-name,Values=running`.
-3. No Service of type LoadBalancer exists (`kubectl get svc -A | grep LoadBalancer` is empty).
-4. `terraform -chdir=infra/terraform destroy` (~15 min).
-5. `make cloud-leftovers` until it reports nothing billable, then `make cloud-cost` once more.
+1. `make cloud-teardown`: checks the AWS login is still valid, removes vLLM, deletes the GPU
+   NodePool, waits until Karpenter has terminated the GPU instance, removes monitoring, and refuses
+   to continue if a LoadBalancer Service or a Karpenter instance is left.
+2. `terraform -chdir=infra/terraform destroy` (~15 min).
+3. `make cloud-leftovers` until it reports nothing billable, then `make cloud-cost` once more.
 
 ## After
 

@@ -115,6 +115,24 @@ def main():
     ok = status.upper() == "STANDARD_SUPPORT"
     report("OK" if ok else "FAIL", "EKS version", f"{version}: {status}, standard support ends {end}")
 
+    # 4b. The EKS API only accepts api_allowed_cidrs: this machine's public IP must be in it, or
+    #     kubectl (and make cloud-teardown) stop working. Home IPs can change between days.
+    import ipaddress
+    import urllib.request
+    try:
+        ip = urllib.request.urlopen("https://checkip.amazonaws.com", timeout=10).read().decode().strip()
+    except OSError as e:
+        ip = None
+        report("WARN", "API access", f"could not read this machine's public IP: {e}")
+    tfvars = TF / "terraform.tfvars"
+    cidrs = re.findall(r'"(\d+\.\d+\.\d+\.\d+/\d+)"', re.search(r"api_allowed_cidrs\s*=\s*\[(.*?)\]", tfvars.read_text(), re.S).group(1)) \
+        if tfvars.exists() and "api_allowed_cidrs" in tfvars.read_text() else []
+    if ip:
+        inside = any(ipaddress.ip_address(ip) in ipaddress.ip_network(c, strict=False) for c in cidrs)
+        report("OK" if inside else "FAIL", "API access",
+               f"public IP {ip} {'is' if inside else 'is NOT'} in api_allowed_cidrs {cidrs or '(not set)'}"
+               + ("" if inside else f": set api_allowed_cidrs = [\"{ip}/32\"] in infra/terraform/terraform.tfvars"))
+
     # 5. Weights uploaded?
     bucket = f"{NAME}-weights-{account}"
     objs = aws("s3api", "list-objects-v2", "--bucket", bucket, "--max-items", "1", check=False)

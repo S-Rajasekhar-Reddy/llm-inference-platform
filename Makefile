@@ -10,6 +10,11 @@
 #   make scale-test    (demo mode) push past the queue threshold and watch it scale out and back
 #   make help          list every target
 #
+#
+# Cloud run (EKS, see docs/cloud-run.md): cloud-kubeconfig, cloud-monitoring-up, up-cloud, smoke-cloud,
+# bench-cloud, down-cloud, cloud-teardown. They use their own kubeconfig (CLOUD_KUBECONFIG), so they
+# can never touch k3s, and the k3s targets can never touch EKS.
+#
 # One-time prerequisites: WSL2 with systemd, Docker Engine, NVIDIA Container Toolkit, Helm,
 # and k3s (`make k3s-install`). See platform/k3s/README.md.
 
@@ -41,6 +46,12 @@ KEDA        ?= 0
 KEDA_VERSION ?= 2.21.1    # kedacore/keda chart
 TF_DIR      := infra/terraform
 BILLING_DIR := infra/billing
+CLOUD_CLUSTER    ?= llm-inference
+CLOUD_REGION     ?= us-east-1
+CLOUD_KUBECONFIG ?= $(HOME)/.kube/llm-inference-eks
+CLOUD_MODEL_DIR  ?= Qwen3-8B-FP8          # folder under s3://<weights bucket>/models/
+GPU_PRICE        ?= 0.8048                # g6.xlarge on-demand, us-east-1, USD/h (docs/cloud-run.md)
+OWNER            ?= sai
 
 # helm lint can't fake the Prometheus Operator APIs, so it checks the chart without them;
 # helm template gets them via --api-versions.
@@ -56,7 +67,17 @@ HELM_LOCAL_ARGS := -f $(CHART)/values-local.yaml $(if $(filter 1,$(KEDA)),-f $(C
 
 .PHONY: help k3s-install preflight device-plugin image-import up-local down-local smoke-local status gpu-smoke lint \
 	monitoring-up monitoring-down monitoring-status grafana alert-test keda-up keda-down scale-test tf-init tf-plan bench-replicas bench \
-	billing-plan cloud-preflight cloud-cost cloud-leftovers
+	billing-plan cloud-preflight cloud-cost cloud-leftovers \
+	cloud-kubeconfig cloud-monitoring-up up-cloud smoke-cloud bench-cloud grafana-cloud status-cloud down-cloud cloud-teardown
+
+# Every cloud target talks to EKS through its own kubeconfig, and refuses to run if that
+# kubeconfig points anywhere else.
+CLOUD_TARGETS := cloud-kubeconfig cloud-monitoring-up up-cloud smoke-cloud bench-cloud grafana-cloud status-cloud down-cloud cloud-teardown
+$(CLOUD_TARGETS): export KUBECONFIG := $(CLOUD_KUBECONFIG)
+define CLOUD_GUARD
+test -f "$(CLOUD_KUBECONFIG)" || { echo "no $(CLOUD_KUBECONFIG): run make cloud-kubeconfig after terraform apply"; exit 1; }
+kubectl config current-context | grep -q "$(CLOUD_CLUSTER)" || { echo "kubeconfig $(CLOUD_KUBECONFIG) does not point at $(CLOUD_CLUSTER)"; exit 1; }
+endef
 
 help: ## List targets
 	@grep -hE '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -138,7 +159,8 @@ lint: ## helm lint + render the local values (no cluster needed)
 	@helm lint $(CHART) $(HELM_LOCAL_ARGS) $(NO_MONITORING)
 	helm template $(RELEASE) $(CHART) $(HELM_LOCAL_ARGS) $(MONITORING_APIS) >/dev/null && echo "template renders"
 	helm template $(RELEASE) $(CHART) $(HELM_LOCAL_ARGS) -f $(CHART)/values-local-keda.yaml $(MONITORING_APIS) >/dev/null && echo "template renders (KEDA demo)"
-	bash -n platform/monitoring/alert-test.sh && bash -n platform/monitoring/prom-api.sh && bash -n platform/autoscaling/scale-test.sh && bash -n bench/replicas-same-gpu.sh && bash -n bench/run.sh && python3 -m py_compile platform/monitoring/loadgen.py platform/monitoring/promq.py && echo "scripts parse"
+	helm template $(RELEASE) $(CHART) -f $(CHART)/values-cloud.yaml --set weights.s3.uri=s3://example/models/x/ $(MONITORING_APIS) >/dev/null && echo "template renders (cloud)"
+	bash -n platform/monitoring/alert-test.sh && bash -n platform/monitoring/prom-api.sh && bash -n platform/autoscaling/scale-test.sh && bash -n bench/replicas-same-gpu.sh && bash -n bench/run.sh && python3 -m py_compile infra/scripts/cloud_timeline.py && python3 -m py_compile platform/monitoring/loadgen.py platform/monitoring/promq.py && echo "scripts parse"
 
 monitoring-up: ## Install kube-prometheus-stack + nvidia_gpu_exporter into the monitoring namespace
 	@helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null 2>&1 || true
@@ -218,3 +240,70 @@ cloud-cost: ## Live cost estimate of the running cloud run (runtime x price); bi
 
 cloud-leftovers: ## After terraform destroy: anything from the run that still exists and bills (exit 1 if so)
 	@python3 infra/scripts/cloud_leftovers.py
+
+cloud-kubeconfig: ## After terraform apply: write the EKS kubeconfig to CLOUD_KUBECONFIG (k3s config untouched)
+	@aws eks update-kubeconfig --region $(CLOUD_REGION) --name $(CLOUD_CLUSTER) --kubeconfig $(CLOUD_KUBECONFIG) --alias $(CLOUD_CLUSTER)
+	kubectl get nodes -o wide
+
+cloud-monitoring-up: ## EKS: kube-prometheus-stack on the system nodes (no GPU exporter: no time-slicing on EKS, it would take the GPU)
+	@$(CLOUD_GUARD)
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null 2>&1 || true
+	helm repo update prometheus-community >/dev/null
+	helm upgrade --install kps prometheus-community/kube-prometheus-stack --version $(strip $(KPS_VERSION)) \
+	  -n $(MON_NS) --create-namespace -f platform/monitoring/kube-prometheus-stack-values.yaml --wait --timeout 10m
+	kubectl -n $(MON_NS) get pods
+
+up-cloud: ## EKS: GPU NodePool + vLLM (weights from S3); waits until Ready and prints the cold-start timeline
+	@$(CLOUD_GUARD)
+	command -v envsubst >/dev/null || { echo "missing: envsubst (sudo apt install gettext-base)"; exit 1; }
+	kubectl get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1 || { echo "run make cloud-monitoring-up first"; exit 1; }
+	bucket=$$(terraform -chdir=$(TF_DIR) output -raw weights_bucket)
+	role=$$(terraform -chdir=$(TF_DIR) output -raw karpenter_node_role)
+	CLUSTER_NAME=$(CLOUD_CLUSTER) NODE_ROLE=$$role OWNER=$(OWNER) envsubst < platform/eks/karpenter-gpu.yaml | kubectl apply -f -
+	echo "deploying: the GPU node, image pull, weights and model load take ~10-15 min the first time"
+	helm upgrade --install $(RELEASE) $(CHART) -n $(NAMESPACE) -f $(CHART)/values-cloud.yaml \
+	  --set weights.s3.uri=s3://$$bucket/models/$(strip $(CLOUD_MODEL_DIR))/ $(HELM_EXTRA) --wait --timeout 25m
+	kubectl -n $(NAMESPACE) get pods -o wide -l app.kubernetes.io/instance=$(RELEASE)
+	python3 infra/scripts/cloud_timeline.py $(NAMESPACE) $(RELEASE)
+	echo "Next: make smoke-cloud, then make bench-cloud. make cloud-cost any time."
+
+smoke-cloud: smoke-local ## EKS: port-forward and request one completion
+
+status-cloud: ## EKS: release, pods, GPU nodes and NodeClaims
+	@$(CLOUD_GUARD)
+	helm list -n $(NAMESPACE)
+	kubectl -n $(NAMESPACE) get pods -o wide -l app.kubernetes.io/instance=$(RELEASE)
+	kubectl get nodes -L node.kubernetes.io/instance-type,karpenter.sh/nodepool
+	kubectl get nodeclaims 2>/dev/null || true
+
+bench-cloud: ## EKS: the same bench/run.sh as the laptop, plus cost per 1M output tokens at GPU_PRICE
+	@$(CLOUD_GUARD)
+	RELEASE=$(RELEASE) NAMESPACE=$(NAMESPACE) VLLM_IMAGE=$(VLLM_IMAGE) COST_PER_HOUR=$(strip $(GPU_PRICE)) bench/run.sh
+
+grafana-cloud: grafana ## EKS: Grafana port-forward (screenshots for the write-up)
+
+down-cloud: ## EKS: remove vLLM; Karpenter removes the idle GPU node ~5 min later (watch make cloud-cost)
+	@$(CLOUD_GUARD)
+	helm uninstall $(RELEASE) -n $(NAMESPACE) --wait || echo "release $(RELEASE) not installed"
+	echo "GPU node should be gone in ~5-6 min:"; kubectl get nodeclaims 2>/dev/null || true
+
+cloud-teardown: ## EKS, BEFORE terraform destroy: remove vLLM, the GPU NodePool and monitoring; wait until no GPU instance runs
+	@$(CLOUD_GUARD)
+	aws sts get-caller-identity >/dev/null || { echo "AWS login expired: run aws login first (destroy needs it too)"; exit 1; }
+	helm uninstall $(RELEASE) -n $(NAMESPACE) --wait 2>/dev/null || true
+	kubectl delete nodepool gpu --ignore-not-found --wait=false
+	echo "waiting for Karpenter to terminate the GPU node..."
+	for i in $$(seq 1 60); do
+	  n=$$(kubectl get nodeclaims --no-headers 2>/dev/null | wc -l)
+	  [ "$$n" -eq 0 ] && break; sleep 10
+	done
+	[ "$$n" -eq 0 ] || { echo "NodeClaims still present after 10 min: check kubectl get nodeclaims; do NOT destroy yet"; exit 1; }
+	kubectl delete ec2nodeclass gpu --ignore-not-found
+	helm uninstall kps -n $(MON_NS) --wait 2>/dev/null || true
+	lbs=$$(kubectl get svc -A --no-headers 2>/dev/null | awk '$$3=="LoadBalancer"' | wc -l)
+	[ "$$lbs" -eq 0 ] || { echo "a Service of type LoadBalancer exists: delete it first"; exit 1; }
+	left=$$(aws ec2 describe-instances --region $(CLOUD_REGION) --filters Name=tag:karpenter.sh/discovery,Values=$(CLOUD_CLUSTER) \
+	  Name=instance-state-name,Values=pending,running --query 'length(Reservations[].Instances[])' --output text)
+	[ "$$left" = 0 ] || { echo "$$left Karpenter instance(s) still running: wait, then run this again"; exit 1; }
+	echo "Clean. Now: terraform -chdir=$(TF_DIR) destroy   then: make cloud-leftovers"
+

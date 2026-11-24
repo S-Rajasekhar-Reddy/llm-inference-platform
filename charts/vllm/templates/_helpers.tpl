@@ -23,3 +23,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
+
+{{- define "vllm.serviceAccountName" -}}
+{{- default (include "vllm.fullname" .) .Values.serviceAccount.name -}}
+{{- end -}}

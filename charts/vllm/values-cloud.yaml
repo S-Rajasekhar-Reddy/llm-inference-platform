@@ -1,0 +1,50 @@
+# EKS with one Karpenter-launched g6.xlarge (1x NVIDIA L4, 24 GB; 4 vCPU, 16 GiB).
+# make up-cloud adds weights.s3.uri from Terraform. Same chart as the laptop; what differs:
+#   - weights come from S3 (init container, Pod Identity), not a hostPath cache
+#   - no RuntimeClass: Bottlerocket's NVIDIA variant makes it the default runtime
+#   - the pod goes to the tainted GPU NodePool; the GPU is not time-sliced here
+runtimeClassName: ""
+hfOffline: true
+
+model:
+  name: /models/Qwen3-8B-FP8
+  servedModelName: Qwen/Qwen3-8B-FP8   # same id as the laptop run, so bench/run.sh compares like for like
+  maxModelLen: 8192
+  gpuMemoryUtilization: 0.85           # same as the laptop default
+
+weights:
+  s3:
+    enabled: true
+    path: /models/Qwen3-8B-FP8
+
+serviceAccount:
+  create: true
+  name: vllm                           # must match the Pod Identity association in infra/terraform/pod-identity.tf
+
+cache:
+  type: emptyDir
+
+# g6.xlarge allocatable is ~3.9 vCPU / ~14 GiB; leave room for the DaemonSets and the bench client.
+resources:
+  requests:
+    cpu: "2"
+    memory: 8Gi
+
+nodeSelector:
+  karpenter.sh/nodepool: gpu
+tolerations:
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule
+
+probes:
+  startup:
+    failureThreshold: 180               # 15 min: first boot compiles and captures CUDA graphs on a new GPU
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+  dashboard:
+    enabled: true
+  alerts:
+    enabled: true

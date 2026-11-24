@@ -4,3 +4,6 @@ budget_alert_emails = ["you@example.com"]
 
 # "tag" once the project tag is an active cost allocation tag; "account" if nothing else runs here.
 # budget_scope = "tag"
+
+# Optional whole-account backstop (normal monthly spend of the account + 20):
+# account_backstop_usd = 40

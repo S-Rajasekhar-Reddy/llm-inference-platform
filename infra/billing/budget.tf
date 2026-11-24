@@ -40,3 +40,33 @@ resource "aws_budgets_budget" "run" {
     subscriber_email_addresses = var.budget_alert_emails
   }
 }
+
+# Backstop: whole account, no tag filter. Alerts at 80% and 100% actual, and on forecast.
+resource "aws_budgets_budget" "account_backstop" {
+  count = var.account_backstop_usd == null ? 0 : 1
+
+  name         = "${var.name}-account-backstop-monthly"
+  budget_type  = "COST"
+  limit_amount = tostring(var.account_backstop_usd)
+  limit_unit   = "USD"
+  time_unit    = "MONTHLY"
+
+  dynamic "notification" {
+    for_each = [80, 100]
+    content {
+      comparison_operator        = "GREATER_THAN"
+      threshold                  = notification.value
+      threshold_type             = "PERCENTAGE"
+      notification_type          = "ACTUAL"
+      subscriber_email_addresses = var.budget_alert_emails
+    }
+  }
+
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 100
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "FORECASTED"
+    subscriber_email_addresses = var.budget_alert_emails
+  }
+}

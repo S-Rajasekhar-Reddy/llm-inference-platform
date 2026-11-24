@@ -11,6 +11,10 @@ output "budget_name" {
 }
 
 output "upload_weights" {
-  description = "Upload the model from the local Hugging Face cache before the run (S3 upload is free; storage is cents)."
-  value       = "aws s3 sync ~/.cache/huggingface/hub/models--Qwen--Qwen3-8B-FP8 s3://${aws_s3_bucket.weights.bucket}/hub/models--Qwen--Qwen3-8B-FP8"
+  description = "Upload one snapshot folder (plain files; syncing the whole HF cache folder would upload every file twice via its symlinks)."
+  value       = "aws s3 sync \"$(ls -d ~/.cache/huggingface/hub/models--Qwen--Qwen3-8B-FP8/snapshots/*/ | head -1)\" s3://${aws_s3_bucket.weights.bucket}/models/Qwen3-8B-FP8/"
+}
+
+output "account_backstop_budget" {
+  value = one(aws_budgets_budget.account_backstop[*].name)
 }

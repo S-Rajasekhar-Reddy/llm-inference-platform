@@ -43,3 +43,15 @@ variable "karpenter_version" {
   type        = string
   default     = "1.15.2"
 }
+
+variable "vllm_namespace" {
+  description = "Namespace of the vLLM release (Pod Identity association for the weights bucket)."
+  type        = string
+  default     = "default"
+}
+
+variable "vllm_service_account" {
+  description = "Service account of the vLLM pod; must match serviceAccount.name in charts/vllm/values-cloud.yaml."
+  type        = string
+  default     = "vllm"
+}

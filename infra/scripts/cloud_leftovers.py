@@ -61,10 +61,10 @@ def main():
             billable.append(f"load balancer {lb['LoadBalancerName']} ({lb['Type']})")
 
     queues = (aws("sqs", "list-queues", "--queue-name-prefix", f"Karpenter-{NAME}", check=False) or {}).get("QueueUrls", [])
-    info += [f"SQS queue {q} (free at this volume)" for q in queues]
+    info.extend(f"SQS queue {q} (free at this volume)" for q in queues)
 
     groups = aws("logs", "describe-log-groups", "--log-group-name-prefix", f"/aws/eks/{NAME}")["logGroups"]
-    billable += [f"log group {g['logGroupName']} ({g.get('storedBytes', 0) / 1e6:.1f} MB stored)" for g in groups]
+    billable.extend(f"log group {g['logGroupName']} ({g.get('storedBytes', 0) / 1e6:.1f} MB stored)" for g in groups)
 
     alias = aws("kms", "describe-key", "--key-id", f"alias/eks/{NAME}", check=False)
     if alias:
@@ -72,8 +72,8 @@ def main():
         (info if state == "PendingDeletion" else billable).append(f"KMS key alias/eks/{NAME}: {state}")
 
     profiles = aws("iam", "list-instance-profiles", region=None)["InstanceProfiles"]
-    info += [f"IAM instance profile {p['InstanceProfileName']} (free; Karpenter-created)"
-             for p in profiles if NAME in p["InstanceProfileName"]]
+    info.extend(f"IAM instance profile {p['InstanceProfileName']} (free; Karpenter-created)"
+                for p in profiles if NAME in p["InstanceProfileName"])
 
     bucket = f"{NAME}-weights-{account}"
     if aws("s3api", "get-bucket-location", "--bucket", bucket, check=False):

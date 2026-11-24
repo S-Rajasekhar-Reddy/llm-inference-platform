@@ -1,0 +1,29 @@
+{
+  "date_utc": "20261124T0526Z",
+  "model": "Qwen/Qwen3-8B-FP8",
+  "image": "vllm/vllm-openai:v0.33.0",
+  "node": "ip-10-0-17-153.ec2.internal",
+  "instance_type": "g6.xlarge",
+  "gpu": "NVIDIA L4, 23034 MiB, 580.178.04",
+  "server_args": [
+    "--model",
+    "/models/Qwen3-8B-FP8",
+    "--served-model-name",
+    "Qwen/Qwen3-8B-FP8",
+    "--max-model-len",
+    "8192",
+    "--gpu-memory-utilization",
+    "0.85"
+  ],
+  "concurrency_levels": [
+    "8",
+    "32",
+    "64"
+  ],
+  "repeats": 3,
+  "input_len": 512,
+  "output_len": 128,
+  "warmup_prompts": 50,
+  "cost_per_hour_usd": 0.8048,
+  "client": "vllm bench serve, in-cluster Job on the server's node"
+}

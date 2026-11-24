@@ -129,7 +129,9 @@ What the numbers say:
 | GPU node | Karpenter launched a g6.xlarge 3–14 s after the pod was pending; removed ~5 min after vLLM was (scale to zero tested) |
 | Cold start (twice) | **650 s and 646 s**: node ready 51 s, weights from S3 8.9 GB in 60 s, vLLM image pull ~335 s, model load ~200 s |
 | Teardown | `make cloud-teardown` (drains the GPU node first), `terraform destroy` 97, `make cloud-leftovers` clean |
-| Cost | ~$2.85 estimated (cluster ~5.9 h, GPU ~1.15 h); actual bill to be added from Cost Explorer |
+| Cost | ~$2.75 estimated: cluster ~5.8 h (~$1.87) + GPU 1.07 h from CloudTrail ($0.86); actual bill to be added from Cost Explorer |
+
+![Grafana: vLLM dashboard on EKS during the L4 benchmark](docs/img/2026-11-24-eks-l4-bench-grafana.png)
 
 The image pull is half the cloud cold start; it is the next thing to cut. Guardrails used: a project budget that
 counts only tagged costs and survives `destroy`, an account-wide backstop, a live cost estimate, and a leftovers

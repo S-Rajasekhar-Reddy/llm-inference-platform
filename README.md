@@ -172,7 +172,7 @@ Honest edges of v1.0, in rough order of what I'd do next:
 
 ## Open-source contributions along the way
 
-- vLLM [#54383](https://github.com/vllm-project/vllm/issues/54383): first-boot KV-cache gap measured on 16 GB (22.8%); validated fix [PR #54479](https://github.com/vllm-project/vllm/pull/54479) on v0.33.0.
+- vLLM [#54383](https://github.com/vllm-project/vllm/issues/54383): first-boot KV-cache gap measured on 16 GB (warm boot got 22.8% more KV cache than cold); validated fix [PR #54479](https://github.com/vllm-project/vllm/pull/54479) on v0.33.0, then [re-validated the reviewed commit](https://github.com/vllm-project/vllm/pull/54479#issuecomment-7183064873) with 3 repeats (no measurable startup cost).
 - vLLM [#60599](https://github.com/vllm-project/vllm/issues/60599#issuecomment-7044806100): benchmark of 1 vs 2 replicas on one GPU (3 runs each).
 - vLLM [#50239](https://github.com/vllm-project/vllm/issues/50239#issuecomment-7157477266): verified the WSL2 + sm_120 "UVA is not available" crash is fixed on v0.33.0, with 17 GPU runs across model runners and pinned-memory modes.
 - prometheus-community/helm-charts [PR #7618](https://github.com/prometheus-community/helm-charts/pull/7618) (open): node-exporter troubleshooting for "not a shared or slave mount" on WSL2.
@@ -218,7 +218,7 @@ What changed:
 
 Side finding: with the compile cache hit, vLLM's startup memory profiling measured a lower peak activation (0.92 GiB instead of 1.58 GiB), so the KV cache grew from 21,024 to 25,824 tokens with identical flags and identical free memory (14.61 GiB). Capacity can change between restarts, so benchmarks will pin `--kv-cache-memory` explicitly.
 
-This is open vLLM issue [#54383](https://github.com/vllm-project/vllm/issues/54383): torch.compile's temporary memory on a cold boot is counted as activation memory. On this 16 GB card the gap was 22.8%, against about 4–5% in earlier reports, so I added that data point to the issue. I then validated the proposed fix, [PR #54479](https://github.com/vllm-project/vllm/pull/54479), on v0.33.0: the patched cold boot got 25,824 tokens and 0.92 GiB peak activation, matching the warm boot, for about 3–6 s of extra engine init. Logs: `*-unpatched-cold.log`, `*-pr54479-cold.log` and `*-pr54479-warm.log` in [`bench/results/coldstart/`](bench/results/coldstart/).
+This is open vLLM issue [#54383](https://github.com/vllm-project/vllm/issues/54383): torch.compile's temporary memory on a cold boot is counted as activation memory. On this 16 GB card the gap was 22.8%, against about 4–5% in earlier reports, so I added that data point to the issue. I then validated the proposed fix, [PR #54479](https://github.com/vllm-project/vllm/pull/54479), on v0.33.0: the patched cold boot got 25,824 tokens and 0.92 GiB peak activation, matching the warm boot. On 26 Nov I re-ran it on the reviewed commit (`5c8ba69`) with 3 repeats: cold matched warm (25,824 tokens) in all 3 runs, and the extra warmup pass added no measurable startup time (engine init −2.3 s cold, +0.3 s warm, within the run-to-run spread). The 3–6 s I first reported came from single runs. Evidence: [`bench/results/oss/vllm-54479/`](bench/results/oss/vllm-54479/). 10 Nov logs: `*-unpatched-cold.log`, `*-pr54479-cold.log` and `*-pr54479-warm.log` in [`bench/results/coldstart/`](bench/results/coldstart/).
 
 ## Layout
 
@@ -238,7 +238,7 @@ This is open vLLM issue [#54383](https://github.com/vllm-project/vllm/issues/543
 
 ## Progress log
 
-- **2026-11-26:** v1.0. Final README: headline results, cloud quick path, limitations, open-source contributions.
+- **2026-11-26:** v1.0. Final README: headline results, cloud quick path, limitations, open-source contributions. Re-validated vLLM PR #54479 at `5c8ba69` on the RTX 5080 (12 boots): cold boots match warm in all runs, no measurable startup cost; corrected my earlier single-run 3–6 s figure.
 - **2026-11-25:** Actual cloud bill from Cost Explorer: $2.67 (estimate $2.75); about half was idle cluster time before `destroy`. Verified vLLM #50239 is fixed on v0.33.0 with 17 GPU runs on WSL2 + RTX 5080 (V2 runner falls back cleanly; opt-in pinned memory adds no throughput; V2 loads ~19 s slower than V1). A Windows NVIDIA driver update broke GPU access in WSL until `wsl --shutdown`.
 - **2026-11-24:** Cloud run on EKS (us-east-1): Terraform applied 97 resources; Karpenter launched an L4 (g6.xlarge) for the pending vLLM pod and removed it when idle; weights came from S3 through Pod Identity (only the `vllm` service account can read the bucket). Cold start 650 s, half of it the image pull. Benchmark with the same script as the laptop: 158 / 326 / 381 tok/s at 8 / 32 / 64 concurrent, $1.42 / $0.69 / $0.59 per 1M output tokens. Preflight caught a home IP change before apply. Destroyed and checked for leftovers. Billed: $2.67.
 - **2026-11-23:** Cost guardrails before any cloud spend: budget and weights bucket moved to their own Terraform stack so `destroy` keeps the alarm; the budget counts only `project`-tagged costs; `make cloud-preflight` / `cloud-cost` / `cloud-leftovers`. Benchmark script `bench/run.sh` (warm-up, 3 repeats per level): laptop 396 / 1,006 / 1,077 tok/s at 8 / 32 / 64 concurrent, replacing the week-1 single run.

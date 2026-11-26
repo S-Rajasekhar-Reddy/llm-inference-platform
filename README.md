@@ -2,9 +2,16 @@
 
 Production-style LLM serving on Kubernetes with vLLM: autoscaling on queue depth, real observability, and published latency and cost benchmarks.
 
-Built by an infrastructure and security engineer, as a secure, observable, production-grade AI serving platform. `make up-local` brings it up on a local k3s cluster with one command; `make up-cloud` deploys the same chart to AWS EKS.
+Built by an infrastructure and security engineer as an observable, production-style AI serving platform (authentication and rate limiting come next, in a separate gateway project). `make up-local` brings it up on a local k3s cluster with one command; `make up-cloud` deploys the same chart to AWS EKS.
 
-**Status:** Week 3 of 3; the platform ships Fri 27 Nov. Running on k3s (laptop GPU) and, on 24 Nov, once on AWS EKS with an NVIDIA L4 launched by Karpenter, from the same Helm chart, with the same benchmark script on both. Prometheus/Grafana monitoring with three tested alerts, KEDA queue-depth autoscaling, and Terraform with cost guardrails are in. [Results](#benchmark-laptop-rtx-5080-vs-cloud-l4-24-nov). Built in public; progress is logged below.
+**Status: v1.0, shipped 26 Nov 2026.** Runs on k3s with a laptop GPU and, once on 24 Nov, on AWS EKS with an NVIDIA L4 launched by Karpenter, from the same Helm chart and with the same benchmark script on both. Prometheus/Grafana monitoring with three tested alerts, KEDA queue-depth autoscaling, and Terraform with cost guardrails (the whole cloud run was billed $2.67). Built in public over three weeks; the progress log is at the end.
+
+**Headline results** ([details](#benchmark-laptop-rtx-5080-vs-cloud-l4-24-nov)):
+
+- Qwen3-8B-FP8 on one GPU: **1,006 output tok/s** on the RTX 5080 Laptop and **326 tok/s** on the cloud L4 at 32 concurrent requests, 3 warmed-up runs each.
+- **$0.59–1.42 per 1M output tokens** on the L4, and the latency target decides which: only the most expensive point keeps time to first token near 1 s.
+- **Cold start 35 min → ~2.3 min** locally (caches); **~11 min** on a fresh cloud GPU node, half of it the image pull.
+- Autoscaling on queue depth (KEDA) and GPU nodes from zero (Karpenter), both tested; cloud run provisioned, benchmarked, destroyed and checked for leftovers.
 
 ## Why this exists
 
@@ -17,17 +24,17 @@ Most LLM serving demos stop at `vllm serve` on one GPU. Production serving is an
 - **Model:** [Qwen3-8B-FP8](https://huggingface.co/Qwen/Qwen3-8B-FP8) (Apache-2.0) as the primary model, and Qwen3-1.7B for fast iteration.
 - **Engine:** vLLM, pinned to an exact release (currently `v0.33.0`).
 
-## Architecture (target)
+## Architecture
 
 ```mermaid
 flowchart LR
-    client["Load generator<br/>vllm bench serve"] --> svc["Kubernetes Service"]
+    client["Load generator<br/>vllm bench serve (in-cluster Job)"] --> svc["Kubernetes Service"]
     svc --> pods["vLLM pods<br/>1 GPU each"]
     pods -- "/metrics" --> prom["Prometheus"]
     prom --> graf["Grafana<br/>TTFT, ITL, KV cache, queue"]
     prom --> keda["KEDA<br/>scales on queue depth"]
     keda -- "replicas" --> pods
-    karp["Karpenter<br/>(cloud run only)"] -. "adds GPU nodes" .-> pods
+    karp["Karpenter<br/>(EKS only)"] -. "adds / removes the GPU node" .-> pods
 ```
 
 Scaling is driven by `vllm:num_requests_waiting` (queue depth), not GPU utilisation. A busy GPU is normal; a growing queue is what users feel.
@@ -52,6 +59,19 @@ make help            # every target
 ```
 
 Details and what broke on the way: [`platform/k3s/`](platform/k3s/README.md); chart values: [`charts/vllm/`](charts/vllm/README.md).
+
+**On AWS EKS, once, with cost guardrails** (full checklist and teardown order: [`docs/cloud-run.md`](docs/cloud-run.md)):
+
+```bash
+make cloud-preflight                       # read-only: quota vs NodePool limit, GPU AZs, EKS version, budget, your IP
+make billing-plan && terraform -chdir=infra/billing apply tfplan      # budget + weights bucket, kept after the run
+make tf-plan && terraform -chdir=infra/terraform apply tfplan         # VPC, EKS, Karpenter, Pod Identity (~20 min)
+make cloud-kubeconfig && make cloud-monitoring-up
+make up-cloud                              # Karpenter launches the L4, weights from S3, prints the cold-start timeline
+make bench-cloud                           # same bench/run.sh as the laptop, plus $ per 1M output tokens
+make cloud-cost                            # live estimate while it runs
+make cloud-teardown && terraform -chdir=infra/terraform destroy && make cloud-leftovers
+```
 
 **In plain Docker, on one GPU:**
 
@@ -78,7 +98,7 @@ docker exec -it $(docker ps -q --filter ancestor=vllm/vllm-openai:v0.33.0) vllm 
 OFFLINE=1 bench/coldstart.sh my-run Qwen/Qwen3-8B-FP8 --max-model-len 8192 --gpu-memory-utilization 0.85
 ```
 
-## Roadmap
+## What's built
 
 - [x] vLLM serving an open-weight model on a local GPU (WSL2, RTX 5080 Laptop)
 - [x] Qwen3-8B-FP8 serving, with KV-cache capacity measured on 16 GB
@@ -90,7 +110,7 @@ OFFLINE=1 bench/coldstart.sh my-run Qwen/Qwen3-8B-FP8 --max-model-len 8192 --gpu
 - [x] Terraform for the cloud run: VPC, EKS, Karpenter, Pod Identity, S3 weights bucket; budget and cost guardrails in a separate stack that outlives the cluster ([`infra/terraform/`](infra/terraform/README.md), [`infra/billing/`](infra/billing/README.md), [runbook](docs/cloud-run.md))
 - [x] One AWS EKS run (24 Nov): same chart, Karpenter adds an L4 node from zero and removes it when idle, cold-start breakdown, destroyed and checked for leftovers
 - [x] Repeated benchmarks with one script (`bench/run.sh`) on the laptop and on EKS: laptop vs L4, cost per 1M output tokens
-- [ ] (Fri 27 Nov) Benchmark write-up and final README
+- [x] Benchmark write-up, actual cloud bill and final README (v1.0, 26 Nov)
 
 ## Benchmark: laptop RTX 5080 vs cloud L4 (24 Nov)
 
@@ -139,6 +159,24 @@ The image pull is half the cloud cold start; it is the next thing to cut. Guardr
 counts only tagged costs and survives `destroy`, an account-wide backstop, a live cost estimate, and a leftovers
 check ([runbook](docs/cloud-run.md)).
 
+## Limitations and next steps
+
+Honest edges of v1.0, in rough order of what I'd do next:
+
+- **Cloud cold start is ~11 min, and half is the image pull** (the vLLM image onto a fresh node). Next: pre-pulled images in the node AMI or a snapshot, or lazy image loading.
+- **One GPU node in the cloud.** The 4 vCPU G/VT quota allows one g6.xlarge, so the run shows Karpenter adding a GPU node from zero and removing it, not scaling out to a second GPU. KEDA's scale-out was proven on one time-sliced laptop GPU, where it adds no capacity.
+- **No authentication, TLS or rate limiting** in front of vLLM: the Service is cluster-internal and reached by port-forward. That is the next project, a secure AI gateway.
+- **`make cloud-cost` only counts what is running**, so terminated GPU nodes drop out of its total; CloudTrail and Cost Explorer gave the real figures (1.07 GPU hours, $2.67).
+- **WSL2 is a fragile host for GPU Kubernetes.** A Windows NVIDIA driver update on 25 Nov broke GPU access inside WSL until `wsl --shutdown`; Windows updates have also restarted WSL mid-session.
+- **Benchmarks are single-model, single-GPU, synthetic prompts** (random 512 in / 128 out). Real traffic with prefix reuse and longer contexts would shift both throughput and cost.
+
+## Open-source contributions along the way
+
+- vLLM [#54383](https://github.com/vllm-project/vllm/issues/54383): first-boot KV-cache gap measured on 16 GB (22.8%); validated fix [PR #54479](https://github.com/vllm-project/vllm/pull/54479) on v0.33.0.
+- vLLM [#60599](https://github.com/vllm-project/vllm/issues/60599#issuecomment-7044806100): benchmark of 1 vs 2 replicas on one GPU (3 runs each).
+- vLLM [#50239](https://github.com/vllm-project/vllm/issues/50239#issuecomment-7157477266): verified the WSL2 + sm_120 "UVA is not available" crash is fixed on v0.33.0, with 17 GPU runs across model runners and pinned-memory modes.
+- prometheus-community/helm-charts [PR #7618](https://github.com/prometheus-community/helm-charts/pull/7618) (open): node-exporter troubleshooting for "not a shared or slave mount" on WSL2.
+
 ## Week 1 baseline (superseded by the benchmark above)
 
 Single run, no warm-up, kept for the record.
@@ -184,7 +222,6 @@ This is open vLLM issue [#54383](https://github.com/vllm-project/vllm/issues/543
 
 ## Layout
 
-
 ```
 ├── Makefile                 # built: up-local/down-local/smoke-local, monitoring, alert-test, bench, up-cloud/down-cloud/bench-cloud/cloud-teardown
 ├── infra/terraform/         # built, applied once (24 Nov) and destroyed: VPC, EKS, Karpenter, Pod Identity, S3 gateway endpoint
@@ -196,11 +233,13 @@ This is open vLLM issue [#54383](https://github.com/vllm-project/vllm/issues/543
 ├── platform/monitoring/     # built: kube-prometheus-stack + GPU exporter values, alert-test script
 ├── platform/autoscaling/    # built: scale-test (in-cluster load, KEDA 1 -> 2 -> 1)
 ├── bench/                   # benchmark runner + raw results (never edited by hand)
-└── docs/                    # architecture, decision records
+└── docs/                    # cloud-run runbook, images
 ```
 
 ## Progress log
 
+- **2026-11-26:** v1.0. Final README: headline results, cloud quick path, limitations, open-source contributions.
+- **2026-11-25:** Actual cloud bill from Cost Explorer: $2.67 (estimate $2.75); about half was idle cluster time before `destroy`. Verified vLLM #50239 is fixed on v0.33.0 with 17 GPU runs on WSL2 + RTX 5080 (V2 runner falls back cleanly; opt-in pinned memory adds no throughput; V2 loads ~19 s slower than V1). A Windows NVIDIA driver update broke GPU access in WSL until `wsl --shutdown`.
 - **2026-11-24:** Cloud run on EKS (us-east-1): Terraform applied 97 resources; Karpenter launched an L4 (g6.xlarge) for the pending vLLM pod and removed it when idle; weights came from S3 through Pod Identity (only the `vllm` service account can read the bucket). Cold start 650 s, half of it the image pull. Benchmark with the same script as the laptop: 158 / 326 / 381 tok/s at 8 / 32 / 64 concurrent, $1.42 / $0.69 / $0.59 per 1M output tokens. Preflight caught a home IP change before apply. Destroyed and checked for leftovers. Billed: $2.67.
 - **2026-11-23:** Cost guardrails before any cloud spend: budget and weights bucket moved to their own Terraform stack so `destroy` keeps the alarm; the budget counts only `project`-tagged costs; `make cloud-preflight` / `cloud-cost` / `cloud-leftovers`. Benchmark script `bench/run.sh` (warm-up, 3 repeats per level): laptop 396 / 1,006 / 1,077 tok/s at 8 / 32 / 64 concurrent, replacing the week-1 single run.
 - **2026-11-20:** Same-GPU replica benchmark (3 runs each): two replicas sharing one GPU were 48% slower at 64 concurrent and unstable at 256; one replica with the whole GPU was best, so `make up-local` now defaults to that and the 2-replica KEDA setup is an opt-in demo (`KEDA=1`). Shared on [vllm#60599](https://github.com/vllm-project/vllm/issues/60599#issuecomment-7044806100).

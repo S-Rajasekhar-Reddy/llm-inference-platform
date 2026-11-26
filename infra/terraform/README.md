@@ -1,6 +1,6 @@
 # Cloud run infrastructure (EKS)
 
-One short GPU run on AWS (week 3): VPC, EKS and Karpenter. The budget and the weights bucket are in a
+One short GPU run on AWS (24 Nov): VPC, EKS and Karpenter. The budget and the weights bucket are in a
 separate stack, [`infra/billing`](../billing/), applied first and kept after this one is destroyed.
 Applied once on 24 Nov (97 resources), benchmarked and destroyed; results in the [main README](../../README.md#cloud-run-eks-24-nov). The run itself
 (checklist, cost model, teardown order) is in [`docs/cloud-run.md`](../../docs/cloud-run.md).
@@ -26,7 +26,7 @@ The EKS API is public but limited to `api_allowed_cidrs` (set your own /32). Sta
 
 ## Cost of the run
 
-About $0.33/h with no GPU node and $1.14/h with one; the planned run is roughly $3–5. Prices,
+About $0.33/h with no GPU node and $1.14/h with one. The 24 Nov run was billed $2.67 (GPU 1.07 h). Prices,
 assumptions and how the run's cost is kept separate from the rest of the account:
 [`docs/cloud-run.md`](../../docs/cloud-run.md#cost-model-us-east-1-on-demand-checked-23-nov-2026).
 `make cloud-cost` estimates live spend during the run; `make cloud-leftovers` checks nothing is left.

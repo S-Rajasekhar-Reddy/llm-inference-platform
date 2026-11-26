@@ -2,7 +2,7 @@
 
 Cluster-level pieces for running the platform on a single-node k3s cluster inside WSL2
 (RTX 5080 Laptop GPU, 16 GB). vLLM itself is deployed by the Helm chart in [`charts/vllm/`](../../charts/vllm/);
-the same chart runs on EKS in week 3.
+the same chart ran on EKS on 24 Nov (see the main README).
 
 | File | What it does |
 |---|---|
